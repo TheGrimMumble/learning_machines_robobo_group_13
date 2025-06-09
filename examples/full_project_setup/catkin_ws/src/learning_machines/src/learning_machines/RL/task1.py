@@ -1,4 +1,4 @@
-from learning_machines.RoboboGymEnv_task1_sim import RoboboGymEnv
+from .RoboboGymEnv_task1_sim import RoboboGymEnv
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_checker import check_env
 from data_files import FIGURES_DIR
