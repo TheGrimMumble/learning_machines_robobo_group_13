@@ -17,6 +17,10 @@ from robobo_interface import (
 
 
 def train_model(rob:SimulationRobobo):
+    total_time_steps = 100
+    policy = 'ppo'
+    version = 'test'
+
     rob = SimulationRobobo()
 
     # Create the environment
@@ -26,13 +30,18 @@ def train_model(rob:SimulationRobobo):
     check_env(env, warn=True)
 
     # Define the PPO model
-    model = PPO("MlpPolicy", env, verbose=1)
+    model = PPO(
+        "MlpPolicy", 
+        env, 
+        verbose=1,
+        n_steps=100,
+        n_epochs=1)
 
     # Train the model
-    model.learn(total_timesteps=2000)
+    model.learn(total_timesteps=total_time_steps)
 
     # Save the model
-    model.save("/root/results/ppo_robobo")
+    model.save(f"/root/results/{policy}_{total_time_steps}_{version}")
 
     # # Test the model
     # obs, _ = env.reset()
