@@ -3,6 +3,8 @@ import sys
 
 from robobo_interface import SimulationRobobo, HardwareRobobo
 from learning_machines import run_all_actions
+from learning_machines.task0 import run_test_task0_actions
+from learning_machines.task1 import train_model
 
 
 if __name__ == "__main__":
@@ -19,4 +21,6 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"{sys.argv[1]} is not a valid argument.")
 
-    run_all_actions(rob)
+    # run_test_task0_actions(rob)
+    train_model(rob)
+    # run_all_actions(rob)
