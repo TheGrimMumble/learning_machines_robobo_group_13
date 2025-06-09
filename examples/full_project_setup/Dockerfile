@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.3
 FROM ros:noetic
 
 # Makking sure our ROS node has ports to connect trough.
@@ -30,7 +31,9 @@ RUN apt-get update -y && apt-get install ffmpeg libsm6 libxext6 ros-noetic-openc
 
 # The python3 interpreter is already being shilled by ros:noetic, so no need for a venv.
 COPY ./requirements.txt /requirements.txt
-RUN python3 -m pip install -r /requirements.txt && rm /requirements.txt
+# RUN python3 -m pip install -r /requirements.txt && rm /requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install -r /requirements.txt && rm /requirements.txt
 
 # This cd's into a new `catkin_ws` directory anyone starting the shell will end up in.
 WORKDIR /root/catkin_ws
