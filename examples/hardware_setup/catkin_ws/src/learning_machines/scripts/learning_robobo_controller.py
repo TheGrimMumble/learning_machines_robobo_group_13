@@ -2,7 +2,7 @@
 import sys
 
 from robobo_interface import SimulationRobobo, HardwareRobobo
-from learning_machines import run_task0
+from learning_machines import run_all_actions
 
 
 if __name__ == "__main__":
@@ -19,6 +19,4 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"{sys.argv[1]} is not a valid argument.")
 
-    print(f"Running all actions...")
-    run_task0(rob)
-    print("Done running all actions.")
+    run_all_actions(rob)

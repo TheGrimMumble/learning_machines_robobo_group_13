@@ -29,6 +29,7 @@ WORKDIR /root/catkin_ws
 # The main thing that's important is the setup.bash file. The catkin_ws stuff makes some commands available, but, as a student, you shouldn't worry about it.
 COPY ./catkin_ws .
 COPY ./scripts/setup.bash ./setup.bash
+COPY ./catkin_ws/* .
 
 # Convert the line endings for the Windows users,
 # calling `dos2unix` on all files ending in `.py` or `.bash`
