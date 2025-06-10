@@ -6,8 +6,11 @@ FROM ros:noetic
 EXPOSE 45100
 EXPOSE 45101
 
-RUN rm /etc/apt/sources.list.d/ros1-latest.list \
-    && rm /usr/share/keyrings/ros1-latest-archive-keyring.gpg
+# RUN rm /etc/apt/sources.list.d/ros1-latest.list \
+    # && rm /usr/share/keyrings/ros1-latest-archive-keyring.gpg
+
+RUN rm -f /etc/apt/sources.list.d/ros1-latest.list /usr/share/keyrings/ros1-latest-archive-keyring.gpg || true
+
 
 RUN apt-get update \
     && apt-get install -y ca-certificates curl
