@@ -229,30 +229,40 @@ def fitness_evaluation(
 
     total_reward = 0.0
     movement_count = 0
+    turning_steps = 0
 
     try:
         while time.time() - start_time < max_time:
             ir = rob.read_irs()
             valid = [r for r in ir if r is not None]
 
+            # Collision detection
             if valid and (
-                valid[4] > collision_threshold_center
-                or valid[2] > collision_threshold_others
-                or valid[5] > collision_threshold_others
-                or valid[7] > collision_threshold_others
-                or valid[0] > collision_threshold_others
-                or valid[1] > collision_threshold_others
-                or valid[6] > collision_threshold_center
-                or valid[3] > collision_threshold_others
+                valid[4] > collision_threshold_center  # front center
+                or valid[2] > collision_threshold_others  # front left
+                or valid[3] > collision_threshold_others  # front right
+                or valid[5] > collision_threshold_others  # side right
+                or valid[7] > collision_threshold_others  # side left
+                or valid[0] > collision_threshold_others  # back left
+                or valid[1] > collision_threshold_others  # back right
+                or valid[6] > collision_threshold_center  # back center
             ):
-                break  # collision — stop, no penalty
+                break  # collision — end episode
 
+            # Get motor commands
             ls, rs = individual.get_motor_commands(ir)
 
-            # Reward for speed, penalized by turning
-            avg_speed = (ls + rs) / 2.0
-            turn_penalty = abs(ls - rs)
-            reward = avg_speed - turn_penalty  # higher when moving fast and straight
+            # Reward shaping: only reward forward motion
+            if ls > 0 and rs > 0:
+                avg_speed = (ls + rs) / 2.0
+                forwardness = 1.0 - abs(ls - rs) / (ls + rs + 1e-5)
+                reward = avg_speed * forwardness
+            else:
+                reward = 0.0
+
+            # Count turning steps (sharp turns)
+            if abs(ls - rs) > 50:
+                turning_steps += 1
 
             total_reward += reward
             movement_count += 1
@@ -266,11 +276,15 @@ def fitness_evaluation(
     if isinstance(rob, SimulationRobobo):
         rob.set_position(initial_pos, initial_orient)
 
-    # if movement_count > 0:
-    #     total_reward /= movement_count  # average reward per step
+    survival_time = time.time() - start_time
+    turn_ratio = turning_steps / movement_count if movement_count > 0 else 1.0
 
-    individual.fitness = total_reward
-    individual.survival_time = time.time() - start_time  # NEW
+    # Final adjusted reward (penalize high turn ratios)
+    adjusted_reward = total_reward * (1.0 - turn_ratio)
+
+    # Save metrics
+    individual.fitness = adjusted_reward
+    individual.survival_time = survival_time
 
     return individual.fitness
 
