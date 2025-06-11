@@ -1,0 +1,13 @@
+catkin_ws/build/
+catkin_ws/devel/
+catkin_ws/install/
+catkin_ws/logs/
+.git/
+.gitignore
+.vscode/
+.idea/
+*.pyc
+__pycache__/
+results/
+*.md
+.DS_Store

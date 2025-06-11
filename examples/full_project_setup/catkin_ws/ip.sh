@@ -1,0 +1,3 @@
+#!/bin/bash
+export GLOBAL_IP_ADRESS=145.108.94.213
+HW_IP=145.108.94.213
