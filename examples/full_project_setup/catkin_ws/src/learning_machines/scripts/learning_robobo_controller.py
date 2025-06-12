@@ -4,7 +4,7 @@ import sys
 from robobo_interface import SimulationRobobo, HardwareRobobo
 from learning_machines import run_all_actions
 # from learning_machines.task0 import run_test_task0_actions
-from learning_machines.RL.task1 import train_model
+from learning_machines.RL.task1 import train_model, inference
 
 
 if __name__ == "__main__":
@@ -21,6 +21,18 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"{sys.argv[1]} is not a valid argument.")
 
-    # run_test_task0_actions(rob)
-    train_model(rob)
     # run_all_actions(rob)
+
+    # run_test_task0_actions(rob)
+    
+    total_time_steps = 512*2
+    policy = 'ppo'
+    version = 'ver_001_'
+
+    # train_model(
+    #     rob,
+    #     total_time_steps = total_time_steps,
+    #     policy = policy,
+    #     version = version
+    #     )
+    inference(rob, f"/root/results/{policy}_{total_time_steps}_{version}.zip")
