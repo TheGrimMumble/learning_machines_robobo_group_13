@@ -18,6 +18,13 @@ if __name__ == "__main__":
         # Use the existing run_all_actions but with parallel support
         rob = None  # We'll handle robot creation in the evolutionary algorithm
         run_all_actions(rob, parallel=True, num_processes=4)
+    elif len(sys.argv) >= 2 and sys.argv[1] == "--file_path":
+        if len(sys.argv) < 3:
+            raise ValueError("Please provide the file path after --file_path argument.")
+        file_path = sys.argv[2]
+        rob = None
+        print(f"Running with file path: {file_path}")
+        run_all_actions(rob, file_path=file_path)
     elif len(sys.argv) < 2:
         raise ValueError(
             """To run, we need to know if we are running on hardware or simulation

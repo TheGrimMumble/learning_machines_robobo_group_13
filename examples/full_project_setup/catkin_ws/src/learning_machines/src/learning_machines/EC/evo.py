@@ -48,7 +48,7 @@ def load_individual(filepath):
     """
     Load a genome and fitness from a pickle file and return a new Individual.
     """
-    with open(filepath, "rb") as f:
+    with open(os.path.join(os.path.join(FIGURES_DIR, "Run 1"), filepath), "rb") as f:
         data = pickle.load(f)
     genome = data.get("genome")
     fitness = data.get("fitness", None)
@@ -215,7 +215,7 @@ class Individual:
 
 
 def fitness_evaluation(
-    rob: IRobobo, individual: Individual, initial_pos, initial_orient, max_time=60.0
+    rob: IRobobo, individual: Individual, initial_pos, initial_orient, max_time=10.0
 ):
     if isinstance(rob, SimulationRobobo):
         rob.set_position(initial_pos, initial_orient)
@@ -247,7 +247,9 @@ def fitness_evaluation(
                 or valid[1] > collision_threshold_others  # back right
                 or valid[6] > collision_threshold_center  # back center
             ):
-                break  # collision — end episode
+                reward -= 100
+
+                # break  # collision — end episode
 
             # Get motor commands
             ls, rs = individual.get_motor_commands(ir)
@@ -360,6 +362,101 @@ def evaluate_individual_worker_continuous(
 def tournament_selection(population, tournament_size=3):
     contenders = random.sample(population, min(tournament_size, len(population)))
     return max(contenders, key=lambda ind: ind.fitness)
+
+
+def run_individual_from_file(file_path, rob: IRobobo = None, max_time=6000.0):
+    """
+    Runs a single loaded individual in the simulation for up to `max_time` seconds.
+    Continuously prints the accumulated reward.
+    """
+    if rob is None:
+        # rob = SimulationRobobo(api_port=20000)
+        rob = HardwareRobobo(camera=True)
+        # rob.play_simulation()
+        stop_after = True
+    else:
+        stop_after = False
+
+    try:
+        individual = load_individual(file_path)
+        # initial_pos = rob.get_position()
+        # initial_orient = rob.get_orientation()
+
+        # rob.set_position(initial_pos, initial_orient)
+        # print()
+        # rob.set_phone_pan_blocking(177, 50)
+        # rob.set_phone_tilt_blocking(67, 50)
+
+        print(f"Running individual from: {file_path}")
+        print("Press Ctrl+C to stop manually.\n")
+
+        start_time = time.time()
+        total_reward = 0.0
+        movement_count = 0
+        turning_steps = 0
+
+        collision_threshold_center = 1000
+        collision_threshold_others = 3500
+
+        while time.time() - start_time < max_time:
+            ir = rob.read_irs()
+            valid = [r for r in ir if r is not None]
+            print(f"IRS readings: {valid}")
+
+            reward = 0
+
+            # Check for collisions
+            if valid and (
+                valid[4] > collision_threshold_center
+                or valid[2] > collision_threshold_others
+                or valid[3] > collision_threshold_others
+                or valid[5] > collision_threshold_others
+                or valid[7] > collision_threshold_others
+                or valid[0] > collision_threshold_others
+                or valid[1] > collision_threshold_others
+                or valid[6] > collision_threshold_center
+            ):
+                print("Collision detected! Stopping evaluation.")
+                reward = -100
+                # break
+
+            ls, rs = individual.get_motor_commands(ir)
+
+            if ls > 0 and rs > 0:
+                avg_speed = (ls + rs) / 2.0
+                forwardness = 1.0 - abs(ls - rs) / (ls + rs + 1e-5)
+                reward += avg_speed * forwardness
+            else:
+                reward += 0.0
+
+            if abs(ls - rs) > 50:
+                turning_steps += 1
+
+            total_reward += reward
+            movement_count += 1
+
+            print(
+                f"Time: {time.time() - start_time:.2f}s | "
+                f"Speed: L={ls} R={rs} | "
+                f"Reward: {total_reward:.2f}"
+            )
+
+            rob.move_blocking(ls, rs, 10)
+
+        rob.move_blocking(0, 0, 50)
+        individual.fitness = total_reward
+        individual.survival_time = time.time() - start_time
+
+        print("\n--- Evaluation Finished ---")
+        print(f"Final reward: {total_reward:.2f}")
+        print(f"Survival time: {individual.survival_time:.2f}s")
+
+    except Exception as e:
+        print(f"Error while running individual: {e}")
+
+    # finally:
+    #     if stop_after:
+    #         rob.stop_simulation()
 
 
 def evolutionary_algorithm(rob: IRobobo = None, parallel=False, num_processes=4):
@@ -540,20 +637,27 @@ def evolutionary_algorithm(rob: IRobobo = None, parallel=False, num_processes=4)
     return all_time_best
 
 
-def run_neuroevolution(rob: IRobobo = None, parallel=False, num_processes=4):
+def run_neuroevolution(
+    rob: IRobobo = None, parallel=False, num_processes=4, file_path=None
+):
     if parallel:
         print("Starting parallel neuroevolution with multiple CoppeliaSim instances")
         print("Each worker will manage its own simulation instance")
     elif isinstance(rob, SimulationRobobo):
         rob.play_simulation()
 
-    best_individual = evolutionary_algorithm(rob, parallel, num_processes)
+    if file_path is not None:
+        run_individual_from_file(file_path, rob)
+    else:
+        best_individual = evolutionary_algorithm(rob, parallel, num_processes)
 
-    if not parallel and isinstance(rob, SimulationRobobo):
-        rob.stop_simulation()
+        if not parallel and isinstance(rob, SimulationRobobo):
+            rob.stop_simulation()
 
-    return None, best_individual
+        return None, best_individual
 
 
-def run_all_actions(rob: IRobobo = None, parallel=False, num_processes=4):
-    return run_neuroevolution(rob, parallel, num_processes)
+def run_all_actions(
+    rob: IRobobo = None, parallel=False, num_processes=4, file_path=None
+):
+    return run_neuroevolution(rob, parallel, num_processes, file_path)
