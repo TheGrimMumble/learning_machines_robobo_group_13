@@ -1,0 +1,5 @@
+{
+    "python.analysis.extraPaths": [
+        "./catkin_ws/src/learning_machines/src"
+    ]
+}
