@@ -14,17 +14,28 @@ def run(port_offset: int) -> None:
 if __name__ == "__main__":
     # Check if we're running in parallel mode
     if len(sys.argv) >= 2 and sys.argv[1] == "--parallel":
-        print("Running evolutionary algorithm with 4 parallel instances...")
         # Use the existing run_all_actions but with parallel support
         rob = None  # We'll handle robot creation in the evolutionary algorithm
-        run_all_actions(rob, parallel=True, num_processes=4)
+        run_all_actions(rob, parallel=True, num_processes=20)
     elif len(sys.argv) >= 2 and sys.argv[1] == "--file_path":
         if len(sys.argv) < 3:
             raise ValueError("Please provide the file path after --file_path argument.")
+
+        # get whether it is hardware or simulation
+        # if sys.argv[3] not in ["--hardware", "--simulation"]:
+        #     raise ValueError(
+        #         "Please specify --hardware or --simulation after --file_path."
+        #     )
+        # if sys.argv[2] == "--hardware":
+        #     is_hardware = True
+        # elif sys.argv[2] == "--simulation":
+        #     is_hardware = False
+        is_hardware = False
+
         file_path = sys.argv[2]
         rob = None
         print(f"Running with file path: {file_path}")
-        run_all_actions(rob, file_path=file_path)
+        run_all_actions(rob, file_path=file_path, is_hardware=is_hardware)
     elif len(sys.argv) < 2:
         raise ValueError(
             """To run, we need to know if we are running on hardware or simulation

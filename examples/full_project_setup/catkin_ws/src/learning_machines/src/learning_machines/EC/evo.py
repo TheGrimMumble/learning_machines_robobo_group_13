@@ -16,6 +16,8 @@ from robobo_interface import (
     SimulationRobobo,
     HardwareRobobo,
 )
+
+import uuid
 import csv
 
 
@@ -48,7 +50,8 @@ def load_individual(filepath):
     """
     Load a genome and fitness from a pickle file and return a new Individual.
     """
-    with open(os.path.join(os.path.join(FIGURES_DIR, "Run 1"), filepath), "rb") as f:
+    with open(os.path.join(FIGURES_DIR, filepath), "rb") as f:
+        # with open(os.path.join(os.path.join(FIGURES_DIR, "Run 1"), filepath), "rb") as f:
         data = pickle.load(f)
     genome = data.get("genome")
     fitness = data.get("fitness", None)
@@ -138,23 +141,44 @@ class Individual:
             genome.append(random.uniform(-0.1, 0.1))
         return genome
 
-    def get_sensor_inputs(self, ir_readings):
-        collision_threshold_center = 1000
-        collision_threshold_others = 3500
+    def get_sensor_inputs(
+        self,
+        ir_readings,
+        collision_threshold_center=1000,
+        collision_threshold_others=3500,
+    ):
+        def normalize(val, min_val, max_val):
+            theoretical_min_log = np.log(min_val)
+            theoretical_max_log = np.log(max_val)
 
-        def normalize(val, max_val):
-            val = 0 if val is None else val
-            val = np.clip(val, 0, max_val)
-            return val / max_val
+            if val < min_val:
+                val = min_val
+            elif val > max_val:
+                val = max_val
 
-        front_left = normalize(ir_readings[2], collision_threshold_others)
-        front_center = normalize(ir_readings[4], collision_threshold_center)
-        front_right = normalize(ir_readings[3], collision_threshold_others)
-        front_left_left = normalize(ir_readings[7], collision_threshold_others)
-        front_right_right = normalize(ir_readings[5], collision_threshold_others)
-        back_left = normalize(ir_readings[0], collision_threshold_others)
-        back_right = normalize(ir_readings[1], collision_threshold_others)
-        back_center = normalize(ir_readings[6], collision_threshold_center)
+            # Normalize to [0, 1] using log scale
+            normalized = (np.log(val) - theoretical_min_log) / (
+                theoretical_max_log - theoretical_min_log
+            )
+            return max(0.0, min(1.0, normalized))
+
+        # front_left = ir_readings[2]  # minimum is 52, maximum is 2500
+        # front_center = ir_readings[4] # minimum is 5, maximum is 2500
+        # front_right = ir_readings[3] #minimum is 52, maximum is 2500
+        # front_left_left = ir_readings[7] # minimum is 5, maximum is 500
+        # front_right_right = ir_readings[5] #minimum is 5, maximum is 250
+        # back_left = ir_readings[0] # minimum is 6, maximum is 2500
+        # back_right = ir_readings[1] # minimum is 6, maximum is 2500
+        # back_center = ir_readings[6] # minimum is 57, maximum is 2500
+
+        front_left = normalize(ir_readings[2], 52, 2500)
+        front_center = normalize(ir_readings[4], 5, 2500)
+        front_right = normalize(ir_readings[3], 52, 2500)
+        front_left_left = normalize(ir_readings[7], 5, 500)
+        front_right_right = normalize(ir_readings[5], 5, 250)
+        back_left = normalize(ir_readings[0], 6, 2500)
+        back_right = normalize(ir_readings[1], 6, 2500)
+        back_center = normalize(ir_readings[6], 57, 2500)
 
         # Append previous motor outputs, normalized from [-100,100] → [0,1]
         prev_l = (self.prev_output[0] + 100) / 200.0
@@ -173,8 +197,15 @@ class Individual:
             prev_r,
         ]
 
-    def get_motor_commands(self, ir_readings):
-        inputs = self.get_sensor_inputs(ir_readings)
+    def get_motor_commands(
+        self,
+        ir_readings,
+        collision_threshold_center=1000,
+        collision_threshold_others=3500,
+    ):
+        inputs = self.get_sensor_inputs(
+            ir_readings, collision_threshold_center, collision_threshold_others
+        )
         self.network.set_weights_from_genome(self.genome)
         outputs = self.network.forward(inputs)
         l = int(outputs[0] * 100)
@@ -214,18 +245,52 @@ class Individual:
         return c1, c2
 
 
+def read_sensor_test():
+    rob = SimulationRobobo(api_port=20000)
+    rob.play_simulation()
+
+    while True:
+        ir_readings = rob.read_irs()
+        # round each reading to one decimal
+        ir_readings = [round(r, 1) if r is not None else 0.0 for r in ir_readings]
+        front_left = ir_readings[
+            2
+        ]  # minimum is 52, maximum is 2500, collision if > 1000
+        front_center = ir_readings[
+            4
+        ]  # minimum is 5, maximum is 2500, collision if > 1000
+        front_right = ir_readings[
+            3
+        ]  # minimum is 52, maximum is 2500, collision if > 1000
+        front_left_left = ir_readings[
+            7
+        ]  # minimum is 5, maximum is 500, collision if > 300
+        front_right_right = ir_readings[
+            5
+        ]  # minimum is 5, maximum is 250, collision > 300
+        back_left = ir_readings[0]  # minimum is 6, maximum is 2500, collision if > 500
+        back_right = ir_readings[1]  # minimum is 6, maximum is 2500, collision if > 500
+        back_center = ir_readings[6]  # minimum is 57, maximum is 2500, collision if
+        print(
+            f"""Front Left: {front_left}, Front Center: {front_center}, Front Right: {front_right}, Front Left Left: {front_left_left}, Front Right Right: {front_right_right}, Back Left: {back_left}, Back Right: {back_right}, Back Center: {back_center}"""
+        )
+        time.sleep(1)
+
+    rob.stop_simulation()
+
+
 def fitness_evaluation(
     rob: IRobobo, individual: Individual, initial_pos, initial_orient, max_time=10.0
 ):
-    if isinstance(rob, SimulationRobobo):
-        rob.set_position(initial_pos, initial_orient)
+    # if isinstance(rob, SimulationRobobo):
+    #     rob.set_position(initial_pos, initial_orient)
 
     rob.set_phone_pan_blocking(177, 50)
     rob.set_phone_tilt_blocking(67, 50)
 
     start_time = time.time()
-    collision_threshold_center = 1000
-    collision_threshold_others = 3500
+    collision_threshold_center = 100
+    collision_threshold_others = 100
 
     total_reward = 0.0
     movement_count = 0
@@ -236,56 +301,76 @@ def fitness_evaluation(
             ir = rob.read_irs()
             valid = [r for r in ir if r is not None]
 
-            # Collision detection
-            if valid and (
-                valid[4] > collision_threshold_center  # front center
-                or valid[2] > collision_threshold_others  # front left
-                or valid[3] > collision_threshold_others  # front right
-                or valid[5] > collision_threshold_others  # side right
-                or valid[7] > collision_threshold_others  # side left
-                or valid[0] > collision_threshold_others  # back left
-                or valid[1] > collision_threshold_others  # back right
-                or valid[6] > collision_threshold_center  # back center
-            ):
-                reward -= 100
+            # collision = False
+            reward = 0
 
-                # break  # collision — end episode
+            # collision fi true if any value is > 300
+            collision = any(r > 300 for r in valid[0:8])
+
+            # # Collision detection
+            # if valid and (
+            #     valid[4] > collision_threshold_center  # front center
+            #     or valid[2] > collision_threshold_others  # front left
+            #     or valid[3] > collision_threshold_others  # front right
+            #     or valid[5] > collision_threshold_others  # side right
+            #     or valid[7] > collision_threshold_others  # side left
+            #     or valid[0] > collision_threshold_others  # back left
+            #     or valid[1] > collision_threshold_others  # back right
+            #     or valid[6] > collision_threshold_center  # back center
+            # ):
+            #     collision = True
+
+            # break  # collision — end episode
 
             # Get motor commands
-            ls, rs = individual.get_motor_commands(ir)
+            ls, rs = individual.get_motor_commands(
+                ir, collision_threshold_center, collision_threshold_others
+            )
 
-            # Reward shaping: only reward forward motion
-            if ls > 0 and rs > 0:
-                avg_speed = (ls + rs) / 2.0
-                forwardness = 1.0 - abs(ls - rs) / (ls + rs + 1e-5)
-                reward = avg_speed * forwardness
-            else:
-                reward = 0.0
+            ir_sensors = individual.get_sensor_inputs(ir)[:-2]  # exclude prev outputs
 
-            # Count turning steps (sharp turns)
-            if abs(ls - rs) > 50:
-                turning_steps += 1
+            speed_norm = max(0.0, (ls + rs) / 200.0)
+            # proximity_penalty = max(ir_sensors)
+            proximity_penalty = sum(ir_sensors) / len(ir_sensors)
 
-            total_reward += reward
+            turn_penalty = abs(ls - rs) / 200.0  # large if turning
+            forwardness = 1.0 - turn_penalty  # 1.0 if straight, 0.0 if sharp turn
+
+            clearance = 1.0 - proximity_penalty
+            reward = speed_norm * clearance * forwardness
+            # print("Speed values: L={}, R={}".format(ls, rs))
+            # print(
+            #     "Speed: {:.2f}, Proximity: {:.2f}, Clearance: {:.2f}, Reward: {:.2f}, Collision: {:.2f}".format(
+            #         speed_norm, proximity_penalty, clearance, reward, int(collision)
+            #     )
+            # )
+
+            # # Count turning steps (sharp turns)
+            # if abs(ls - rs) > 50:
+            #     turning_steps += 1
+
+            if not collision:
+                total_reward += reward
+
             movement_count += 1
 
-            rob.move_blocking(ls, rs, 10)
+            rob.move_blocking(ls, rs, 300)
 
     except Exception as e:
         print(f"Error during evaluation: {e}")
 
     rob.move_blocking(0, 0, 50)
-    if isinstance(rob, SimulationRobobo):
-        rob.set_position(initial_pos, initial_orient)
+    # if isinstance(rob, SimulationRobobo):
+    #     rob.set_position(initial_pos, initial_orient)
 
     survival_time = time.time() - start_time
-    turn_ratio = turning_steps / movement_count if movement_count > 0 else 1.0
+    # turn_ratio = turning_steps / movement_count if movement_count > 0 else 1.0
 
     # Final adjusted reward (penalize high turn ratios)
-    adjusted_reward = total_reward * (1.0 - turn_ratio)
+    # adjusted_reward = total_reward * (1.0 - turn_ratio)
 
     # Save metrics
-    individual.fitness = adjusted_reward
+    individual.fitness = total_reward  # adjusted_reward
     individual.survival_time = survival_time
 
     return individual.fitness
@@ -364,28 +449,33 @@ def tournament_selection(population, tournament_size=3):
     return max(contenders, key=lambda ind: ind.fitness)
 
 
-def run_individual_from_file(file_path, rob: IRobobo = None, max_time=6000.0):
+def run_individual_from_file(
+    file_path, rob: IRobobo = None, max_time=6000.0, is_hardware=False
+):
     """
     Runs a single loaded individual in the simulation for up to `max_time` seconds.
-    Continuously prints the accumulated reward.
+    Logs sensor data (IRs) to a uniquely named CSV file in the same directory as `file_path`.
+    Writes each row to the CSV file in real-time (not just at the end).
     """
     if rob is None:
-        # rob = SimulationRobobo(api_port=20000)
-        rob = HardwareRobobo(camera=True)
-        # rob.play_simulation()
+        if is_hardware:
+            rob = HardwareRobobo(camera=False)
+        else:
+            rob = SimulationRobobo(api_port=20000)
+            rob.play_simulation()
         stop_after = True
     else:
         stop_after = False
 
     try:
         individual = load_individual(file_path)
-        # initial_pos = rob.get_position()
-        # initial_orient = rob.get_orientation()
 
-        # rob.set_position(initial_pos, initial_orient)
-        # print()
-        # rob.set_phone_pan_blocking(177, 50)
-        # rob.set_phone_tilt_blocking(67, 50)
+        if not is_hardware:
+            initial_pos = rob.get_position()
+            initial_orient = rob.get_orientation()
+            rob.set_position(initial_pos, initial_orient)
+            rob.set_phone_pan_blocking(177, 50)
+            rob.set_phone_tilt_blocking(67, 50)
 
         print(f"Running individual from: {file_path}")
         print("Press Ctrl+C to stop manually.\n")
@@ -395,53 +485,74 @@ def run_individual_from_file(file_path, rob: IRobobo = None, max_time=6000.0):
         movement_count = 0
         turning_steps = 0
 
-        collision_threshold_center = 1000
-        collision_threshold_others = 3500
+        if is_hardware:
+            collision_threshold_center = 75
+            collision_threshold_others = 50
+        else:
+            collision_threshold_center = 1000
+            collision_threshold_others = 3500
 
-        while time.time() - start_time < max_time:
-            ir = rob.read_irs()
-            valid = [r for r in ir if r is not None]
-            print(f"IRS readings: {valid}")
+        # Prepare CSV for live logging
+        base_dir = os.path.dirname(file_path)
+        unique_id = uuid.uuid4().hex[:8]
+        csv_filename = os.path.join(base_dir, f"sensor_log_{unique_id}.csv")
+        csv_headers = (
+            ["timestamp"]
+            + [f"IR_{i}" for i in range(8)]
+            + ["L_speed", "R_speed", "reward"]
+        )
 
-            reward = 0
+        with open(csv_filename, mode="w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(csv_headers)  # Write header once
 
-            # Check for collisions
-            if valid and (
-                valid[4] > collision_threshold_center
-                or valid[2] > collision_threshold_others
-                or valid[3] > collision_threshold_others
-                or valid[5] > collision_threshold_others
-                or valid[7] > collision_threshold_others
-                or valid[0] > collision_threshold_others
-                or valid[1] > collision_threshold_others
-                or valid[6] > collision_threshold_center
-            ):
-                print("Collision detected! Stopping evaluation.")
-                reward = -100
-                # break
+            while time.time() - start_time < max_time:
+                ir = rob.read_irs()
+                valid = [
+                    r if r is not None else 0 for r in ir
+                ]  # Replace None with 0 for logging
+                print(f"IRS readings: {valid}")
 
-            ls, rs = individual.get_motor_commands(ir)
+                reward = 0
 
-            if ls > 0 and rs > 0:
-                avg_speed = (ls + rs) / 2.0
-                forwardness = 1.0 - abs(ls - rs) / (ls + rs + 1e-5)
-                reward += avg_speed * forwardness
-            else:
-                reward += 0.0
+                if valid and (
+                    valid[4] > collision_threshold_center
+                    or valid[2] > collision_threshold_others
+                    or valid[3] > collision_threshold_others
+                    or valid[5] > collision_threshold_others
+                    or valid[7] > collision_threshold_others
+                    or valid[0] > collision_threshold_others
+                    or valid[1] > collision_threshold_others
+                    or valid[6] > collision_threshold_center
+                ):
+                    print("Collision detected! Stopping evaluation.")
 
-            if abs(ls - rs) > 50:
-                turning_steps += 1
+                ls, rs = individual.get_motor_commands(
+                    ir, collision_threshold_center, collision_threshold_others
+                )
 
-            total_reward += reward
-            movement_count += 1
+                if ls > 0 and rs > 0:
+                    avg_speed = (ls + rs) / 2.0
+                    forwardness = 1.0 - abs(ls - rs) / (ls + rs + 1e-5)
+                    reward += avg_speed * forwardness
 
-            print(
-                f"Time: {time.time() - start_time:.2f}s | "
-                f"Speed: L={ls} R={rs} | "
-                f"Reward: {total_reward:.2f}"
-            )
+                if abs(ls - rs) > 50:
+                    turning_steps += 1
 
-            rob.move_blocking(ls, rs, 10)
+                total_reward += reward
+                movement_count += 1
+
+                timestamp = time.time() - start_time
+                writer.writerow([timestamp] + valid + [ls, rs, reward])
+                f.flush()  # Ensure data is written immediately
+
+                print(
+                    f"Time: {timestamp:.2f}s | "
+                    f"Speed: L={ls} R={rs} | "
+                    f"Reward: {total_reward:.2f}"
+                )
+
+                rob.move_blocking(ls, rs, 300)
 
         rob.move_blocking(0, 0, 50)
         individual.fitness = total_reward
@@ -450,21 +561,22 @@ def run_individual_from_file(file_path, rob: IRobobo = None, max_time=6000.0):
         print("\n--- Evaluation Finished ---")
         print(f"Final reward: {total_reward:.2f}")
         print(f"Survival time: {individual.survival_time:.2f}s")
+        print(f"Sensor log saved to: {csv_filename}")
 
     except Exception as e:
         print(f"Error while running individual: {e}")
 
-    # finally:
-    #     if stop_after:
-    #         rob.stop_simulation()
+    finally:
+        if stop_after and not is_hardware:
+            rob.stop_simulation()
 
 
-def evolutionary_algorithm(rob: IRobobo = None, parallel=False, num_processes=4):
-    POP_SIZE = 100
+def evolutionary_algorithm(rob: IRobobo = None, parallel=False, num_processes=10):
+    POP_SIZE = 60
     GENS = 300
     MUT_RATE = 0.15
     MUT_STR = 0.3
-    ELITE = int(0.05 * POP_SIZE)  # 5% elitism
+    ELITE = 4  # int(0.1 * POP_SIZE)  # 10% elitism
 
     # Get initial position and orientation
     if parallel:
@@ -563,9 +675,9 @@ def evolutionary_algorithm(rob: IRobobo = None, parallel=False, num_processes=4)
                     population[idx].min_distance = result["min_distance"]
 
                     results_collected += 1
-                    # print(
-                    #     f" Individual {idx+1}/{POP_SIZE} completed - Fitness: {population[idx].fitness:.2f} ({results_collected}/{len(population)} done)"
-                    # )
+                    print(
+                        f" Individual {idx+1}/{POP_SIZE} completed - Fitness: {population[idx].fitness:.2f} ({results_collected}/{len(population)} done)"
+                    )
 
                 except Exception as e:
                     print(f"Timeout or error waiting for results: {e}")
@@ -638,7 +750,11 @@ def evolutionary_algorithm(rob: IRobobo = None, parallel=False, num_processes=4)
 
 
 def run_neuroevolution(
-    rob: IRobobo = None, parallel=False, num_processes=4, file_path=None
+    rob: IRobobo = None,
+    parallel=False,
+    num_processes=10,
+    file_path=None,
+    is_hardware=False,
 ):
     if parallel:
         print("Starting parallel neuroevolution with multiple CoppeliaSim instances")
@@ -647,7 +763,7 @@ def run_neuroevolution(
         rob.play_simulation()
 
     if file_path is not None:
-        run_individual_from_file(file_path, rob)
+        run_individual_from_file(file_path, rob, is_hardware=is_hardware)
     else:
         best_individual = evolutionary_algorithm(rob, parallel, num_processes)
 
@@ -658,6 +774,11 @@ def run_neuroevolution(
 
 
 def run_all_actions(
-    rob: IRobobo = None, parallel=False, num_processes=4, file_path=None
+    rob: IRobobo = None,
+    parallel=False,
+    num_processes=10,
+    file_path=None,
+    is_hardware=False,
 ):
-    return run_neuroevolution(rob, parallel, num_processes, file_path)
+    # read_sensor_test()
+    return run_neuroevolution(rob, parallel, num_processes, file_path, is_hardware)
