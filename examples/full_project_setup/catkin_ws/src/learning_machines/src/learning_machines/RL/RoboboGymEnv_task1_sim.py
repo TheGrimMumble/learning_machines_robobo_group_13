@@ -37,7 +37,7 @@ class RoboboGymEnv(gym.Env):
         self.current_action = np.array([0,0], dtype=np.float32)
 
         # The duration of a step in miliseconds, so each step takes half a second
-        self.timestep_duration = 50
+        self.timestep_duration = 100
 
         self.step_in_episode = 0
         self.epoch_number = 0
@@ -99,10 +99,10 @@ class RoboboGymEnv(gym.Env):
         return raw_ir
 
     # returns IR sensor data
-    def get_obs(self):
+    def get_obs(self, action):
         raw_ir = np.array(self.robobo.read_irs(), dtype=np.float32)
         ir_sensor_data = self.linear_normalize(raw_ir)
-        obs = np.concatenate([ir_sensor_data, self.current_action]).astype(np.float32)
+        obs = np.concatenate([ir_sensor_data, action]).astype(np.float32)
         return obs
     
     def collision(self, obs):
@@ -113,14 +113,54 @@ class RoboboGymEnv(gym.Env):
             return True
         return False
     
+    def close(self, obs):
+        irs = obs[:8]
+        if np.max(irs) > 0.1:
+            print("Too Close!")
+            self.close_call_count += 1
+            return True
+        return False
+    
     def punish_proximity(self, obs):
         irs = obs[:8]
         reward = 0
-        if np.max(irs) > 0.08:
-            print("Too Close!")
-            self.close_call_count += 1
+        if np.max(irs) > 0.05:
             reward += np.max(irs) * 8 # (max(irs) - 0.75) * 100
         return float(reward)
+    
+    def dist_from_origin_reward(self):
+        coordinates = np.sum(self.dist_from_origin_buffer, axis=0)
+        # print(coordinates)
+        y, x = coordinates
+        distance = np.sqrt(y**2 + x**2)
+
+        angle = np.arctan2(y, x)
+        ideal_angle = np.pi / 4  # y = x
+        angle_diff = np.abs(np.arctan2(
+            np.sin(angle - ideal_angle),
+            np.cos(angle - ideal_angle)
+            ))
+        direction_score = np.cos(angle_diff)  # 1 = perfect, -1 = opposite
+        
+        reward = distance * direction_score
+        return float(reward)
+    
+
+    def get_reward(self, obs):
+        reward = 0
+        if self.collision(obs):
+            self.dist_from_origin_buffer = self.reset_origin_buffer()
+        elif self.close(obs):
+            index = int(np.round(np.max(obs[:8]) * 20))
+            self.dist_from_origin_buffer[:index] = [
+                np.array([0,0], dtype=np.float32) for _ in range(index)
+                ]
+            reward += self.dist_from_origin_reward()
+        else:
+            reward += self.dist_from_origin_reward()
+        reward -= self.punish_proximity(obs)
+        return float(reward)
+
     
     def complex_speed_reward(self, obs):
         irs_back = [obs[o] for o in (0, 1, 6)]
@@ -157,33 +197,6 @@ class RoboboGymEnv(gym.Env):
         speed_threshold = 0
         if obs[8] > speed_threshold and obs[9] > speed_threshold:
             reward += (obs[8] + obs[9]) * 10
-        return float(reward)
-
-    def dist_from_origin_reward(self):
-        coordinates = np.sum(self.dist_from_origin_buffer, axis=0)
-        print(coordinates)
-        y, x = coordinates
-        distance = np.sqrt(y**2 + x**2)
-
-        angle = np.arctan2(y, x)
-        ideal_angle = np.pi / 4  # y = x
-        angle_diff = np.abs(np.arctan2(
-            np.sin(angle - ideal_angle),
-            np.cos(angle - ideal_angle)
-            ))
-        direction_score = np.cos(angle_diff)  # 1 = perfect, -1 = opposite
-        
-        reward = distance * direction_score
-        return float(reward)
-    
-
-    def get_reward(self, obs):
-        reward = 0
-        if not self.collision(obs):
-            reward += self.dist_from_origin_reward()
-        else:
-            self.dist_from_origin_buffer = self.reset_origin_buffer()
-        reward -= self.punish_proximity(obs)
         return float(reward)
     
 
@@ -226,7 +239,7 @@ class RoboboGymEnv(gym.Env):
         self.robobo.move_blocking(left_speed, right_speed, self.timestep_duration)
         
         # Get new obs 
-        observation = self.get_obs()
+        observation = self.get_obs(action)
         reward = self.get_reward(observation)
         done = self.terminate()
         info = self.get_info(observation, reward)
@@ -267,7 +280,7 @@ class RoboboGymEnv(gym.Env):
         # time.sleep(0.2)
 
         # Get initial obs
-        obs = self.get_obs()
+        obs = self.get_obs(self.current_action)
 
         return obs, {}
 

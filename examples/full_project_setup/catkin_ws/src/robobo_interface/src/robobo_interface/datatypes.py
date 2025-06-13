@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 
 # The simulation can be quite imprecise, not to speak about the hardware.
-TOLERANCE = 0.1
+TOLERANCE = 0.01
 
 
 class Emotion(Enum):

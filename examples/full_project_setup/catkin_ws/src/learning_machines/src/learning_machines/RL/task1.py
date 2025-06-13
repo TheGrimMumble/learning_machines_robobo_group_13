@@ -11,6 +11,8 @@ from robobo_interface import (
     LedId,
     LedColor,
     SoundEmotion,
+    Position,
+    Orientation,
     SimulationRobobo,
     HardwareRobobo,
 )
@@ -41,8 +43,8 @@ def train_model(
         env,
         learning_rate=0.001, # default: 0.0003
         verbose=1,
-        n_steps=64, #  <------------------------
-        n_epochs=32)
+        n_steps=512, #  <------------------------
+        n_epochs=16) #  <------------------------
     
     initial_params = get_flat_params(model).clone()
 
@@ -84,11 +86,12 @@ def continue_training(
 def inference(
         rob:SimulationRobobo,
         path: str,
-        i
+        training_steps,
+        print_to_csv=True
         ):
     env = RoboboGymEnv(rob)
 
-    n_steps = 64 #  <------------------------
+    n_steps = 128 #  <------------------------
 
     env.max_steps_in_episode = n_steps
     model = PPO.load(path, env=env)
@@ -100,6 +103,7 @@ def inference(
 
     while not done:
         action, _ = model.predict(obs, deterministic=True)
+        # print("action:", action, "shape:", getattr(action, "shape", None))
 
         max_speed = 100
         left_speed = action[0] * max_speed
@@ -112,11 +116,124 @@ def inference(
     left_mean_speed = sum(left_speeds) / n_steps
     right_mean_speed = sum(right_speeds) / n_steps
     
-    with open(f"{path}.csv", "a") as f:
-        writer = csv.writer(f)
-        writer.writerow([n_steps * i,
-                         left_mean_speed,
-                         right_mean_speed,
-                         env.close_call_count,
-                         env.collision_count])
+    if print_to_csv:
+        with open(f"{path}.csv", "a") as f:
+            writer = csv.writer(f)
+            writer.writerow([training_steps,
+                            left_mean_speed,
+                            right_mean_speed,
+                            env.close_call_count,
+                            env.collision_count])
+            
+def format_number(n):
+    # Try to format with 4 to 0 decimal places
+    for i in range(4, -1, -1):
+        formatted = f"{n:.{i}f}"
+        if len(formatted) <= 6:
+            return f"{formatted:<6}"
+    # If nothing fits, round to nearest integer and return as string
+    return str(round(n))
+
+
+def test_robot_sensors(rob:SimulationRobobo, speed):
+    rob.stop_simulation()
+    rob.play_simulation()
+    irs_pos = [
+        'BR',
+        'BL',
+        'FR2',
+        'FL2',
+        'FM',
+        'FL1',
+        'BM',
+        'FR1'
+    ]
+    print_pos = [
+        "x",
+        "y",
+        "z",
+        "BL",
+        "BM",
+        "BR",
+        "FL1",
+        "FL2",
+        "FM",
+        "FR2",
+        "FR1"
+    ]
+    pos = rob.get_position()
+    ori = rob.get_orientation()
+    print(f"\n\nPosition: x = {pos.x}, y = {pos.y}, z = {pos.z}\n" + \
+          f"Orientation: yaw = {ori.yaw}, pitch = {ori.pitch}, roll = {ori.roll}")
+    rob.set_position(pos, Orientation(float(1), ori.pitch, ori.roll))
+
+    while True:
+        rob.move_blocking(speed, speed, 100)
+        pos_new = rob.get_position()
+        if pos_new == pos:
+            print(f"\nCollision position: {pos_new}")
+            break
+        else:
+            print(f"\nPosition: {pos_new}")
+            pos = pos_new
+
+    rob.set_position(pos_new, Orientation(float(1), ori.pitch, ori.roll))
+    header = "".join([h.ljust(9) for h in print_pos])
+    print("\n", header)
+
+    for i in range(20):
+        irs = rob.read_irs()
+        pos = rob.get_position()
+        vals = {**{"x": pos.x, "y": pos.y, "z": pos.z},
+                **{irs_pos[i]: v for i, v in enumerate(irs)}}
+        print("".join([format_number(vals[v]).ljust(9) for v in print_pos]))
+        rob.move_blocking(-speed, -speed, 100)
+
+
+
+
+
+def test_robot_sensors_deprecated(rob:SimulationRobobo):
+    pos = rob.get_position()
+    ori = rob.get_orientation()
+    print(f"Position: x = {pos.x}, y = {pos.y}, z = {pos.z}\n" + \
+          f"Orientation: yaw = {ori.yaw}, pitch = {ori.pitch}, roll = {ori.roll}")
+    instruction = "Type 'p' to set position, 'o' to set orientation, 'po' to set both, and type 'exit' to stop.\n"
+    act = input(instruction)
+    while True:
+        if act == "exit":
+            break
+
+        try:
+            if act == "p":
+                raw = input("Enter x,y,z: ")
+                x, y, z = map(float, raw.split(","))
+                rob.set_position(Position(x, y, z), ori)
+
+            elif act == "o":
+                raw = input("Enter yaw,pitch,roll: ")
+                yaw, pitch, roll = map(float, raw.split(","))
+                rob.set_position(pos, Orientation(yaw, pitch, roll))
+
+            elif act == "po":
+                raw = input("Enter x,y,z,yaw,pitch,roll: ")
+                x, y, z, yaw, pitch, roll = map(float, raw.split(","))
+                rob.set_position(Position(x, y, z), Orientation(yaw, pitch, roll))
+
+            else:
+                raise ValueError(f"Unknown action '{act}'")
+
+        except Exception as e:
+            print("Error:", e)
+            act = input("Please follow the instructions:\n" + instruction)
+            continue
+
+        # Refresh and display current state
+        pos = rob.get_position()
+        ori = rob.get_orientation()
+        print(f"Position: x={pos.x}, y={pos.y}, z={pos.z}")
+        print(f"Orientation: yaw={ori.yaw}, pitch={ori.pitch}, roll={ori.roll}")
+
+        act = input(instruction)
+
 
