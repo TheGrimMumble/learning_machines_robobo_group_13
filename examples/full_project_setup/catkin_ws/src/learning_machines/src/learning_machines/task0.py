@@ -61,7 +61,6 @@ def task0(rob:IRobobo):
 
     while True:
         counter += 1
-        # start moving forward asynchronously
         rob.move(10, 10, 1000) 
 
         sensor_data = rob.read_irs()
@@ -84,7 +83,7 @@ def task0(rob:IRobobo):
             dict_timestep[counter] = dict_sensor_values
 
             counter += 1
-            rob.move_blocking(-50, 50, 800)  # spin right
+            rob.move_blocking(-50, 50, 800)  
             
             sensor_data = rob.read_irs()
             dict_sensor_values = create_sensor_dict(sensor_data)
@@ -154,9 +153,9 @@ def run_test_task0_actions(rob: IRobobo):
         rob.play_simulation()
 
     # test_sensors_on_hardware(rob)
-    # task0(rob)
+    task0(rob)
     # go_forward_1min(rob)
-    go_forward_250ms_fullspeed(rob)
+    # go_forward_250ms_fullspeed(rob)
     # go_backward_1min(rob)
 
     if isinstance(rob, SimulationRobobo):
