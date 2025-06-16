@@ -29,9 +29,9 @@ if __name__ == "__main__":
     else:
         raise ValueError(f"{sys.argv[1]} is not a valid argument.")
 
-    run_all_actions(rob)
-    run_all_actions(val_rob)
-    run_all_actions(test_rob)
+    # run_all_actions(rob)
+    # run_all_actions(val_rob)
+    # run_all_actions(test_rob)
 
     # test_robot_sensors(test_rob, 20)
     # test_robot_sensors(test_rob, -20)
@@ -59,16 +59,16 @@ if __name__ == "__main__":
         36864,
         38912,
     ]
-    # robs = [rob, val_rob, test_rob]
-    # for steps in [34816]:
-    #     for r in robs:
-    #         print(f"\n\nStep: {steps}\n\n")
-    #         inference(
-    #             r,
-    #             f"/root/results/{policy}_{total_time_steps}_{version}_{steps}",
-    #             total_time_steps,
-    #             print_to_csv=False
-    #             )
+    robs = [rob, val_rob, test_rob]
+    for steps in [34816]:
+        for r in robs:
+            print(f"\n\nStep: {steps}\n\n")
+            inference(
+                r,
+                f"/root/results/{policy}_{total_time_steps}_{version}_{steps}",
+                total_time_steps,
+                print_to_csv=False
+                )
 
     # for i in range(51): #  <------------------------
     #     continue_training(

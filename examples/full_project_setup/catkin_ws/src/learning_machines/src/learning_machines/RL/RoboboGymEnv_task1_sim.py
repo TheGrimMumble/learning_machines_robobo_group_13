@@ -37,7 +37,7 @@ class RoboboGymEnv(gym.Env):
         self.current_action = np.array([0,0], dtype=np.float32)
 
         # The duration of a step in miliseconds, so each step takes half a second
-        self.timestep_duration = 100
+        self.timestep_duration = 50
 
         self.step_in_episode = 0
         self.epoch_number = 0
