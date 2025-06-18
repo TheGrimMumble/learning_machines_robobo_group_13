@@ -2,7 +2,8 @@ from stable_baselines3 import PPO
 # from learning_machines.RoboboGymEnv_task1_sim import RoboboGymEnv
 # from learning_machines.RoboboGymEnv_task1_sim_V2 import RoboboGymEnv
 # from learning_machines.RoboboGymEnv_task1_sim_V3 import RoboboGymEnv
-from learning_machines.RoboboGymEnv_task1_sim_V4 import RoboboGymEnv
+# from learning_machines.RoboboGymEnv_task1_sim_V4 import RoboboGymEnv
+from learning_machines.RoboboGymEnv_task2_sim_V1 import RoboboGymEnv
 from robobo_interface import SimulationRobobo
 import time
 
@@ -12,7 +13,7 @@ from collections import defaultdict
 
 def test_model(rob):
     # Load the trained model
-    model_path = "/root/results/ppo_110000_V4_continued.zip"
+    model_path = "/root/results/ppo_7200_task2_V1.zip"
     model = PPO.load(model_path)
 
     # Set up the robot and environment
