@@ -1,4 +1,5 @@
 from .RoboboGymEnv_task1_sim import RoboboGymEnv
+import time
 import csv
 import torch
 import numpy as np
@@ -30,6 +31,10 @@ def train_model(
         policy = 'ppo',
         version = 'test',
         ):
+    
+    rob.stop_simulation()
+    time.sleep(2)
+    rob.play_simulation()
 
     # Create the environment
     env = RoboboGymEnv(rob)
@@ -44,7 +49,7 @@ def train_model(
         learning_rate=0.001, # default: 0.0003
         verbose=1,
         n_steps=512, #  <------------------------
-        n_epochs=16) #  <------------------------
+        n_epochs=8) #  <------------------------
     
     initial_params = get_flat_params(model).clone()
 
@@ -73,14 +78,18 @@ def train_model(
 def continue_training(
         rob:SimulationRobobo,
         path: str,
+        iteration,
         total_time_steps = 128,
         policy = 'ppo',
         version = 'test',
         ):
+    rob.stop_simulation()
+    time.sleep(2)
+    rob.play_simulation()
     env = RoboboGymEnv(rob)
     model = PPO.load(path, env=env)
     model.learn(total_timesteps=total_time_steps)
-    model.save(f"/root/results/{policy}_{total_time_steps}_{version}")
+    model.save(f"/root/results/{policy}_{total_time_steps * iteration}_{version}")
 
 
 def inference(
@@ -89,9 +98,12 @@ def inference(
         training_steps,
         print_to_csv=True
         ):
+    rob.stop_simulation()
+    time.sleep(2)
+    rob.play_simulation()
     env = RoboboGymEnv(rob)
 
-    n_steps = 128 #  <------------------------
+    n_steps = 512 #  <------------------------
 
     env.max_steps_in_episode = n_steps
     model = PPO.load(path, env=env)
@@ -100,6 +112,7 @@ def inference(
     done = False
     left_speeds = []
     right_speeds = []
+    rewards = []
 
     while not done:
         action, _ = model.predict(obs, deterministic=True)
@@ -113,17 +126,22 @@ def inference(
 
         obs, reward, done, _bool, info = env.step(action)
 
+        rewards.append(reward)
+
     left_mean_speed = sum(left_speeds) / n_steps
     right_mean_speed = sum(right_speeds) / n_steps
+    mean_reward = sum(rewards) / n_steps
     
     if print_to_csv:
+        path = "/root/results/ppo_all_day_v02"
         with open(f"{path}.csv", "a") as f:
             writer = csv.writer(f)
             writer.writerow([training_steps,
                             left_mean_speed,
                             right_mean_speed,
                             env.close_call_count,
-                            env.collision_count])
+                            env.collision_count,
+                            mean_reward])
             
 def format_number(n):
     # Try to format with 4 to 0 decimal places
@@ -137,6 +155,7 @@ def format_number(n):
 
 def test_robot_sensors(rob:SimulationRobobo, speed):
     rob.stop_simulation()
+    time.sleep(2)
     rob.play_simulation()
     irs_pos = [
         'BR',

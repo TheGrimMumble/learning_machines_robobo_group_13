@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import sys
 import csv
+import traceback
+from datetime import datetime
 
 from robobo_interface import SimulationRobobo, HardwareRobobo
 from learning_machines import run_all_actions
@@ -40,7 +42,7 @@ if __name__ == "__main__":
     
     total_time_steps = 512*4 #  <------------------------
     policy = 'ppo'
-    version = 'all_night_v01'
+    version = 'all_day_v03'
 
     # train_model(
     #     rob,
@@ -50,36 +52,72 @@ if __name__ == "__main__":
     #     )
     # with open(f"/root/results/{policy}_{total_time_steps}_{version}.csv", "w") as f:
     #     writer = csv.writer(f)
-    #     writer.writerow(["Step #", "Left Speed", "Right Speed", "Close Call", "Collision"])
+    #     writer.writerow(["Step #", "Left Speed", "Right Speed", "Close Call", "Collision", "Reward"])
 
-    test_vers = [
-        30720,
-        32768,
-        34816,
-        36864,
-        38912,
-    ]
-    robs = [rob, val_rob, test_rob]
-    for steps in [34816]:
-        for r in robs:
-            print(f"\n\nStep: {steps}\n\n")
-            inference(
-                r,
-                f"/root/results/{policy}_{total_time_steps}_{version}_{steps}",
-                total_time_steps,
-                print_to_csv=False
-                )
-
-    # for i in range(51): #  <------------------------
-    #     continue_training(
-    #         rob,
-    #         f"/root/results/{policy}_{total_time_steps}_{version}",
-    #         total_time_steps = total_time_steps,
-    #         policy = policy,
-    #         version = version
-    #     )
+    # test_vers = [
+    #     30720,
+    #     32768,
+    #     34816,
+    #     36864,
+    #     38912,
+    # ]
+    # for steps in [34816]:
+    # robs = [rob, val_rob, test_rob]
+    # for r in robs:
+    #     # print(f"\n\nStep: {steps}\n\n")
     #     inference(
-    #         val_rob,
-    #         f"/root/results/{policy}_{total_time_steps}_{version}",
-    #         (total_time_steps * (i+2))
+    #         r,
+    #         f"/root/results/{policy}_{24576}_{version}",
+    #         total_time_steps,
+    #         print_to_csv=False
     #         )
+
+
+
+
+
+    for i in range(11, 151):  # <------------------------
+        # Retry continue_training until it succeeds
+        while True:
+            print(f"Starting training at step {total_time_steps * (i + 1)}:")
+            try:
+                continue_training(
+                    rob,
+                    f"/root/results/{policy}_{total_time_steps * (i + 1)}_{version}",
+                    i + 2,
+                    total_time_steps=total_time_steps,
+                    policy=policy,
+                    version=version
+                )
+                print("Training paused")
+                break  # Exit the loop if successful
+            except Exception as e:
+                print(f"continue_training failed at iteration {i+1}: {e}, retrying...")
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                with open("/root/results/error_log_training.txt", "a") as f:
+                    f.write(f"[{timestamp}]\n")
+                    traceback.print_exc(file=f)
+                    f.write(f"\n\n\n")
+
+        # Retry inference until it succeeds
+        while True:
+            print(f"Starting inference at step {total_time_steps * (i + 2)}:")
+            try:
+                inference(
+                    val_rob,
+                    f"/root/results/{policy}_{total_time_steps * (i + 2)}_{version}",
+                    total_time_steps * (i + 2)
+                )
+                print("Inference successful")
+                break  # Exit the loop if successful
+            except Exception as e:
+                print(f"inference failed at iteration {i+1}: {e}, retrying...")
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                with open("/root/results/error_log_inference.txt", "a") as f:
+                    f.write(f"[{timestamp}]\n")
+                    traceback.print_exc(file=f)
+                    f.write(f"\n\n\n")
+
+
+
+
