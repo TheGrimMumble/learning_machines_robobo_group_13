@@ -10,9 +10,9 @@ export ROS_MASTER_URI="http://10.15.3.173:11311"
 # macOS:
 #    ipconfig getifaddr en1
 
-# Fallback to a default IP if host.docker.internal is not defined
-if grep -q 'Linux' /proc/version; then
-    export COPPELIA_SIM_IP="192.168.0.102"  # or use hostname -I | awk '{print $1}'
+if [ "$HOST_OS" = "linux" ]; then
+    export COPPELIA_SIM_IP="192.168.0.102"
 else
     export COPPELIA_SIM_IP="host.docker.internal"
 fi
+
