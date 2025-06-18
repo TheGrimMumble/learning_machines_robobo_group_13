@@ -3,6 +3,7 @@ from gymnasium import spaces
 import numpy as np
 import time
 import cv2
+import time
 
 from data_files import FIGURES_DIR
 from robobo_interface import (
@@ -37,14 +38,14 @@ class RoboboGymEnv(gym.Env):
         self.current_action = np.array([0,0], dtype=np.float32)
 
         # The duration of a step in miliseconds, so each step takes half a second
-        self.timestep_duration = 50
+        self.timestep_duration = 100
 
         self.step_in_episode = 0
         self.epoch_number = 0
 
         # The max amount of steps the robot can take per episode
         self.max_steps_in_episode = 512*2
-        self.origin_buffer_size = 16
+        self.origin_buffer_size = 10
         self.first_step = True
         self.dist_from_origin_buffer = self.reset_origin_buffer()
         self.close_call_count = 0
@@ -92,7 +93,7 @@ class RoboboGymEnv(gym.Env):
         return IR_sensor_data
     
     def linear_normalize(self, raw_ir):
-        calibrate = np.array([0, 0, 45, 45, 0, 0, 50, 0])
+        calibrate = np.array([0, 0, 45, 45, 0, -30, 50, -30])
         raw_ir -= calibrate
         raw_ir = np.clip(raw_ir, 1, self.IR_range_max)
         raw_ir /= self.IR_range_max
@@ -124,8 +125,8 @@ class RoboboGymEnv(gym.Env):
     def punish_proximity(self, obs):
         irs = obs[:8]
         reward = 0
-        if np.max(irs) > 0.05:
-            reward += np.max(irs) * 8 # (max(irs) - 0.75) * 100
+        if np.max(irs) > 0.1:
+            reward += np.max(irs) # (max(irs) - 0.75) * 100
         return float(reward)
     
     def dist_from_origin_reward(self):
@@ -141,9 +142,20 @@ class RoboboGymEnv(gym.Env):
             np.cos(angle - ideal_angle)
             ))
         direction_score = np.cos(angle_diff)  # 1 = perfect, -1 = opposite
+        modified_score = (direction_score * 10) - 9
         
-        reward = distance * direction_score
+        reward = distance * modified_score * 0.1
+
         return float(reward)
+    
+    def dont_wiggle_reward(self, obs):
+        previous_action = self.current_action
+        action_now = np.array([obs[8], obs[9]], dtype=np.float32)
+
+        diff = np.abs(previous_action - action_now)
+        total_diff = np.sum(diff)
+
+        return float((4 - total_diff) / 8)
     
 
     def get_reward(self, obs):
@@ -159,6 +171,7 @@ class RoboboGymEnv(gym.Env):
         else:
             reward += self.dist_from_origin_reward()
         reward -= self.punish_proximity(obs)
+        reward += self.dont_wiggle_reward(obs)
         return float(reward)
 
     
@@ -230,7 +243,6 @@ class RoboboGymEnv(gym.Env):
         self.step_in_episode += 1
         self.dist_from_origin_buffer.append(action)
         self.dist_from_origin_buffer.pop(0)
-        self.current_action = action
         max_speed = 100
         left_speed = action[0] * max_speed
         right_speed = action[1] * max_speed
@@ -241,6 +253,7 @@ class RoboboGymEnv(gym.Env):
         # Get new obs 
         observation = self.get_obs(action)
         reward = self.get_reward(observation)
+        self.current_action = action
         done = self.terminate()
         info = self.get_info(observation, reward)
         info_headers = [
@@ -269,6 +282,7 @@ class RoboboGymEnv(gym.Env):
         # Reset simulator, not sure yet whether we should stop and start the simulator
         # for each episode, but it seemed like the savest option to start with
         self.robobo.stop_simulation()
+        time.sleep(2)
         self.robobo.play_simulation()
 
         self.step_in_episode = 0
