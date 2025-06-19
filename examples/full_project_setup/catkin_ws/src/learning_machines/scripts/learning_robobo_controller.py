@@ -16,7 +16,7 @@ if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "--parallel":
         # Use the existing run_all_actions but with parallel support
         rob = None  # We'll handle robot creation in the evolutionary algorithm
-        run_all_actions(rob, parallel=True, num_processes=20)
+        run_all_actions(rob, parallel=True, num_processes=30)
     elif len(sys.argv) >= 2 and sys.argv[1] == "--file_path":
         if len(sys.argv) < 3:
             raise ValueError("Please provide the file path after --file_path argument.")
