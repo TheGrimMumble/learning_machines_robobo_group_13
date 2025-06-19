@@ -7,7 +7,7 @@ from datetime import datetime
 from robobo_interface import SimulationRobobo, HardwareRobobo
 from learning_machines import run_all_actions
 # from learning_machines.task0 import run_test_task0_actions
-from learning_machines.RL.task1 import (
+from learning_machines.RL.task2 import (
     train_model,
     inference,
     continue_training,
@@ -25,9 +25,10 @@ if __name__ == "__main__":
     elif sys.argv[1] == "--hardware":
         rob = HardwareRobobo(camera=True)
     elif sys.argv[1] == "--simulation":
-        rob = SimulationRobobo(identifier=1)
-        val_rob = SimulationRobobo(identifier=0)
-        test_rob = SimulationRobobo(identifier=2)
+        rob = SimulationRobobo()
+        # rob = SimulationRobobo(identifier=1)
+        # val_rob = SimulationRobobo(identifier=0)
+        # test_rob = SimulationRobobo(identifier=2)
     else:
         raise ValueError(f"{sys.argv[1]} is not a valid argument.")
 
@@ -35,24 +36,31 @@ if __name__ == "__main__":
     # run_all_actions(val_rob)
     # run_all_actions(test_rob)
 
-    # test_robot_sensors(test_rob, 20)
-    # test_robot_sensors(test_rob, -20)
+    # test_robot_sensors(rob, 20)
+    # test_robot_sensors(rob, -20)
 
     # run_test_task0_actions(rob)
     
-    total_time_steps = 512*4 #  <------------------------
+    total_time_steps = 256*4 #  <------------------------
     policy = 'ppo'
-    version = 'all_day_v03'
+    version = 'task2_v01'
 
-    # train_model(
-    #     rob,
-    #     total_time_steps = total_time_steps,
-    #     policy = policy,
-    #     version = version
-    #     )
-    # with open(f"/root/results/{policy}_{total_time_steps}_{version}.csv", "w") as f:
-    #     writer = csv.writer(f)
-    #     writer.writerow(["Step #", "Left Speed", "Right Speed", "Close Call", "Collision", "Reward"])
+    train_model(
+        rob,
+        total_time_steps = total_time_steps,
+        policy = policy,
+        version = version
+        )
+    with open(f"/root/results/{policy}_{version}.csv", "w") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Step #", "Left Speed", "Right Speed", "Close Call", "Collision", "# steps to find all", "Mean reward"])
+
+    inference(
+        rob,
+        policy,
+        total_time_steps,
+        version
+        )
 
     # test_vers = [
     #     30720,
@@ -73,10 +81,10 @@ if __name__ == "__main__":
     #         )
 
 
+    # run_all_actions(rob)
 
 
-
-    for i in range(11, 151):  # <------------------------
+    for i in range(51):  # <------------------------
         # Retry continue_training until it succeeds
         while True:
             print(f"Starting training at step {total_time_steps * (i + 1)}:")
@@ -104,9 +112,10 @@ if __name__ == "__main__":
             print(f"Starting inference at step {total_time_steps * (i + 2)}:")
             try:
                 inference(
-                    val_rob,
-                    f"/root/results/{policy}_{total_time_steps * (i + 2)}_{version}",
-                    total_time_steps * (i + 2)
+                    rob,
+                    policy,
+                    total_time_steps * (i + 2),
+                    version
                 )
                 print("Inference successful")
                 break  # Exit the loop if successful

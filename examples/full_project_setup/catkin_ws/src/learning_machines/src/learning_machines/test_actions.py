@@ -75,13 +75,12 @@ def run_all_actions(rob: IRobobo):
     # test_move_and_wheel_reset(rob)
     if isinstance(rob, SimulationRobobo):
         # test_sim(rob)
-        rob.move_blocking(-10, 30, 1_000) # Turn left
-        rob.move_blocking(100, -100, 25) # Turn right
-        rob.move_blocking(1, 1, 20_000) # Forwards really slowly
-        rob.move_blocking(-0.3, -0.3, 20_000)
-        rob.move_blocking(50, 50, 20_000)
-        rob.move_blocking(-50, -50, 20_000)
-
+        for i in range(200):
+            rob.move_blocking(100, -100, 50)
+        for i in range(200):
+            rob.move_blocking(-50, 50, 50) # Turn left
+        for i in range(200):
+            rob.move_blocking(25, -25, 50) # Turn left
 
     # if isinstance(rob, HardwareRobobo):
     #     test_hardware(rob)
