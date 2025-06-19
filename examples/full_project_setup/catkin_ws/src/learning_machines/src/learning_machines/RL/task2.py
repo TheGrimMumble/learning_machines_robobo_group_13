@@ -17,6 +17,11 @@ from robobo_interface import (
     SimulationRobobo,
     HardwareRobobo,
 )
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+
+
+def make_env(rob):
+    return lambda: RoboboGymEnv(rob)
 
 # Initialize your robot interface (assuming it's simulation for now)
 # from robobo_interface import SimulationRobobo     
@@ -30,17 +35,20 @@ def train_model(
         total_time_steps = 128,
         policy = 'ppo',
         version = 'test',
+        multiproc = None,
+        debug = True
         ):
-    
-    rob.stop_simulation()
-    time.sleep(2)
-    rob.play_simulation()
 
     # Create the environment
-    env = RoboboGymEnv(rob)
+    if multiproc:
+        env_fns = [make_env(rob) for _ in range(multiproc)]
+        env = SubprocVecEnv(env_fns)
+    else:
+        env = RoboboGymEnv(rob)
 
     # Check if the environment follows Gym API properly
-    check_env(env, warn=True)
+    if debug:
+        check_env(env, warn=True)
 
     # Define the PPO model
     model = PPO(
@@ -73,6 +81,7 @@ def train_model(
     #     obs, reward, done, truncated, info = env.step(action)
     #     if done or truncated:
     #         obs, _ = env.reset()
+    return model, env
 
 
 def continue_training(
@@ -82,11 +91,13 @@ def continue_training(
         total_time_steps = 128,
         policy = 'ppo',
         version = 'test',
+        multiproc = None
         ):
-    rob.stop_simulation()
-    time.sleep(2)
-    rob.play_simulation()
-    env = RoboboGymEnv(rob)
+    if multiproc:
+        env_fns = [make_env(rob) for _ in range(multiproc)]
+        env = SubprocVecEnv(env_fns)
+    else:
+        env = RoboboGymEnv(rob)
     model = PPO.load(path, env=env)
     model.learn(total_timesteps=total_time_steps)
     model.save(f"/root/results/{policy}_{total_time_steps * iteration}_{version}")
@@ -100,9 +111,6 @@ def inference(
         print_to_csv=True
         ):
     path = f"/root/results/{policy}_{training_steps}_{version}"
-    rob.stop_simulation()
-    time.sleep(2)
-    rob.play_simulation()
     env = RoboboGymEnv(rob)
 
     n_steps = 512 #  <------------------------
@@ -128,7 +136,7 @@ def inference(
 
         obs, reward, done, _bool, info = env.step(action)
         if done:
-            nmbr_steps_findall = env.steps_to_find_all
+            nmbr_steps_findall = env.steps_to_findall
 
         rewards.append(reward)
 

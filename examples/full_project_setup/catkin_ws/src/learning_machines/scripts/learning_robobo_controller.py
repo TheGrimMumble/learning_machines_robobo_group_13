@@ -2,6 +2,7 @@
 import sys
 import csv
 import traceback
+import time
 from datetime import datetime
 
 from robobo_interface import SimulationRobobo, HardwareRobobo
@@ -26,6 +27,9 @@ if __name__ == "__main__":
         rob = HardwareRobobo(camera=True)
     elif sys.argv[1] == "--simulation":
         rob = SimulationRobobo()
+        rob.stop_simulation()
+        time.sleep(2)
+        rob.play_simulation()
         # rob = SimulationRobobo(identifier=1)
         # val_rob = SimulationRobobo(identifier=0)
         # test_rob = SimulationRobobo(identifier=2)
@@ -43,9 +47,9 @@ if __name__ == "__main__":
     
     total_time_steps = 256*4 #  <------------------------
     policy = 'ppo'
-    version = 'task2_v01'
+    version = 'task2_v02'
 
-    train_model(
+    model, env = train_model(
         rob,
         total_time_steps = total_time_steps,
         policy = policy,
@@ -83,20 +87,30 @@ if __name__ == "__main__":
 
     # run_all_actions(rob)
 
+    n = 1
 
     for i in range(51):  # <------------------------
         # Retry continue_training until it succeeds
         while True:
             print(f"Starting training at step {total_time_steps * (i + 1)}:")
             try:
-                continue_training(
-                    rob,
-                    f"/root/results/{policy}_{total_time_steps * (i + 1)}_{version}",
-                    i + 2,
-                    total_time_steps=total_time_steps,
-                    policy=policy,
-                    version=version
+                # continue_training(
+                #     rob,
+                #     f"/root/results/{policy}_{total_time_steps * (i + 1)}_{version}",
+                #     i + 2,
+                #     total_time_steps=total_time_steps,
+                #     policy=policy,
+                #     version=version
+                # )
+                # In-place further learning
+                model.learn(
+                    total_timesteps=total_time_steps,
+                    reset_num_timesteps=False
                 )
+                # Optionally save every N iterations
+                if i % n == 0:
+                    model.save(f"/root/results/{policy}_{total_time_steps*(i+1)}_{version}")
+
                 print("Training paused")
                 break  # Exit the loop if successful
             except Exception as e:
@@ -129,4 +143,4 @@ if __name__ == "__main__":
 
 
 
-
+h

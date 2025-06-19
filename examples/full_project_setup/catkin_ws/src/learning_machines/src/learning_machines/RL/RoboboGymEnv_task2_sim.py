@@ -52,14 +52,14 @@ class RoboboGymEnv(gym.Env):
         self.close_call_count = 0
         self.collision_count = 0
 
-        self.image_w_h = 512
+        self.vision_size = 256
         self.total_count_food = 7
         self.nr_collected_food = 0
         self.prev_nr_collected_food = 0
 
         self.green_lower = np.array([50, 100, 100])
         self.green_upper = np.array([80, 255, 255])
-        self.morph_kernel = np.ones((3, 3), np.uint8)
+        self.kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
 
         self.prev_area = None
         self.steps_since_green_found = 0
@@ -81,11 +81,11 @@ class RoboboGymEnv(gym.Env):
             "Rwrd"
             ]
         self.prnt_frmt = [
-            "|", "", "",
-            "|FL1", "", "", "", "",
-            "FR1|", "",
-            "|", "", "",
-            "|"
+            "|   ", "", "",
+            "|FL1   ", "", "", "", "",
+            "FR1|   ", "",
+            "|   ", "", "",
+            "|   "
             ]
         self.notes = ""
         
@@ -98,43 +98,38 @@ class RoboboGymEnv(gym.Env):
         pass
 
     def detect_green_object(self, image):
-        frame = cv2.resize(image, (0, 0), fx=0.5, fy=0.5)
-        # Convert image to HSV color space
-        hsv = cv2.cvtColor(cv2.UMat(frame), cv2.COLOR_BGR2HSV)
+        # 1. Resize ONCE to vision_size × vision_size
+        frame = cv2.resize(image, (self.vision_size, self.vision_size))
 
-        # Define green color range (tweak if needed)
-        lower_green = self.green_lower
-        upper_green = self.green_upper
+        # 2. Convert to HSV (plain numpy array)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-        # Create binary mask where green is white
-        mask = cv2.inRange(hsv, lower_green, upper_green)
+        # 3. Mask out green in one go
+        mask = cv2.inRange(hsv, self.green_lower, self.green_upper)
 
-        # Optional: clean up mask noise
-        kernel = self.morph_kernel
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN,  self.kernel, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel, iterations=1)
 
-        # Find contours (i.e., detected green blobs)
+        # 5. Find contours
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         green_found = False
         center_x = 0.5
-        area = 0
+        area = 0.0
 
         if contours:
-            # Find largest contour (assume it's the green box)
             largest = max(contours, key=cv2.contourArea)
-            area = cv2.contourArea(largest)
-
-            if area > 300:  # filter out small noise
+            raw_area = cv2.contourArea(largest)
+            if raw_area > 75:
                 green_found = True
-                area /= (self.image_w_h * self.image_w_h)
-
-                # Get bounding box and centroid
                 x, y, w, h = cv2.boundingRect(largest)
-                center_x = (x + w // 2) / self.image_w_h # 512 is the amount of pixels
+                # divide by current frame width, i.e. vision_size
+                center_x = (x + w*0.5) / self.vision_size
+            # normalize area to [0,1] relative to vision_size²
+            area = raw_area / (self.vision_size * self.vision_size)
 
         return [green_found, center_x, area]
+
 
     def get_info(self, obs, reward):
         info = {
@@ -268,7 +263,7 @@ class RoboboGymEnv(gym.Env):
             reward += self.dist_from_origin_reward()
             reward -= self.punish_proximity(obs)
             reward += self.dont_wiggle_reward(obs)
-            reward -= self.steps_since_green_found * 0.5
+            reward -= self.steps_since_green_found * 0.01
 
         return float(reward)
 
@@ -322,9 +317,9 @@ class RoboboGymEnv(gym.Env):
         self.nr_collected_food = self.robobo.get_nr_food_collected()
         left_just = 10
         if self.first_step:
-            print("Stp#" + "".join(
+            print("Stp#".ljust(left_just) + "".join(
                 [self.prnt_frmt[i] + k.ljust(left_just) for i, k in enumerate(self.prnt_pos)]
-                ) + "| Notes")
+                ) + "|   Notes")
             self.first_step = False
         # Rescale from [-1, 1] to actual motor speeds, e.g. [-100, 100]
         action = np.array(action, dtype=np.float32)
@@ -362,7 +357,7 @@ class RoboboGymEnv(gym.Env):
         # Reset simulator, not sure yet whether we should stop and start the simulator
         # for each episode, but it seemed like the savest option to start with
         self.robobo.stop_simulation()
-        time.sleep(2)
+        # time.sleep(2)
         self.robobo.play_simulation()
 
         self.step_in_episode = 0
