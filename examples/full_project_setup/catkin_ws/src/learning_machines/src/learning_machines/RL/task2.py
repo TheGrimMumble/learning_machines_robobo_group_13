@@ -56,11 +56,13 @@ def train_model(
         env,
         learning_rate=0.001, # default: 0.0003
         verbose=1,
-        n_steps=256, #  <------------------------
+        n_steps=512, #  <------------------------
         n_epochs=8) #  <------------------------
     
     initial_params = get_flat_params(model).clone()
 
+    rob.set_phone_pan_blocking(177, 100)
+    rob.set_phone_tilt_blocking(100, 100)
     # Train the model
     model.learn(total_timesteps=total_time_steps)
 
@@ -87,6 +89,25 @@ def train_model(
 def continue_training(
         rob:SimulationRobobo,
         path: str,
+        total_time_steps = 128,
+        policy = 'ppo',
+        version = 'test',
+        multiproc = None
+        ):
+    if multiproc:
+        env_fns = [make_env(rob) for _ in range(multiproc)]
+        env = SubprocVecEnv(env_fns)
+    else:
+        env = RoboboGymEnv(rob)
+    model = PPO.load(path, env=env)
+    rob.set_phone_pan_blocking(177, 100)
+    rob.set_phone_tilt_blocking(100, 100)
+    return model, env
+
+
+def continue_training_deprecated(
+        rob:SimulationRobobo,
+        path: str,
         iteration,
         total_time_steps = 128,
         policy = 'ppo',
@@ -99,6 +120,8 @@ def continue_training(
     else:
         env = RoboboGymEnv(rob)
     model = PPO.load(path, env=env)
+    rob.set_phone_pan_blocking(177, 100)
+    rob.set_phone_tilt_blocking(100, 100)
     model.learn(total_timesteps=total_time_steps)
     model.save(f"/root/results/{policy}_{total_time_steps * iteration}_{version}")
 
@@ -110,6 +133,7 @@ def inference(
         version,
         print_to_csv=True
         ):
+
     path = f"/root/results/{policy}_{training_steps}_{version}"
     env = RoboboGymEnv(rob)
 
@@ -124,6 +148,8 @@ def inference(
     right_speeds = []
     rewards = []
 
+    rob.set_phone_pan_blocking(177, 100)
+    rob.set_phone_tilt_blocking(100, 100)
     while not done:
         action, _ = model.predict(obs, deterministic=True)
         # print("action:", action, "shape:", getattr(action, "shape", None))

@@ -82,8 +82,13 @@ def run_all_actions(rob: IRobobo):
         for i in range(200):
             rob.move_blocking(25, -25, 50) # Turn left
 
-    # if isinstance(rob, HardwareRobobo):
-    #     test_hardware(rob)
+    if isinstance(rob, HardwareRobobo):
+        for i in range(100):
+            rob.move_blocking(100, -100, 50)
+        for i in range(100):
+            rob.move_blocking(-50, 50, 50) # Turn left
+        for i in range(100):
+            rob.move_blocking(25, -25, 50) # Turn left
 
     # test_phone_movement(rob)
 

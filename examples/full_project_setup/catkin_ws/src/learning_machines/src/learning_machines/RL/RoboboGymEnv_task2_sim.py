@@ -20,6 +20,8 @@ class RoboboGymEnv(gym.Env):
     def __init__(self, rob: IRobobo):
         super().__init__()
         self.robobo = rob
+        self.robobo.set_phone_pan_blocking(177, 100)
+        self.robobo.set_phone_tilt_blocking(100, 100)
 
         # Left and right wheel, needs rescaling
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
@@ -61,8 +63,9 @@ class RoboboGymEnv(gym.Env):
         self.green_upper = np.array([80, 255, 255])
         self.kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
 
-        self.prev_area = None
+        self.prev_area = 0
         self.steps_since_green_found = 0
+        self.steps_since_food_found = 0
 
         self.prnt_pos = [
             "irBL",
@@ -184,7 +187,7 @@ class RoboboGymEnv(gym.Env):
     def collision(self, obs):
         irs = obs[:8]
         if np.max(irs) > 0.5:
-            self.notes = "Collision!"
+            self.notes = " Collision!"
             self.collision_count += 1
             return True
         return False
@@ -192,7 +195,7 @@ class RoboboGymEnv(gym.Env):
     def close(self, obs):
         irs = obs[:8]
         if np.max(irs) > 0.1:
-            self.notes = "Too Close!"
+            self.notes = " Too Close!"
             self.close_call_count += 1
             return True
         return False
@@ -238,21 +241,23 @@ class RoboboGymEnv(gym.Env):
 
         if food_found > 0:
             self.steps_since_green_found = 0
+            self.steps_since_food_found = 0
             reward += food_found * 10
+            self.notes = " Found food!"
 
         elif green_found:
             self.steps_since_green_found = 0
+            self.steps_since_food_found += 1
             alignment = 1.0 - abs(obs[11] - 0.5) * 2
             left_speed = obs[8]
             right_speed = obs[9]
             if left_speed > 0 and right_speed > 0:
-                reward += alignment * left_speed * right_speed
-            if self.prev_area:
-                reward += obs[12] - self.prev_area
+                reward += alignment * left_speed * right_speed * 2
+            reward += (obs[12] - self.prev_area) * 20
 
-        else:
+        elif self.steps_since_green_found > 2:
             self.steps_since_green_found += 1
-            self.prev_area = None
+            self.steps_since_food_found += 1
             if self.collision(obs):
                 self.dist_from_origin_buffer = self.reset_origin_buffer()
             elif self.close(obs):
@@ -260,10 +265,13 @@ class RoboboGymEnv(gym.Env):
                 self.dist_from_origin_buffer[:index] = [
                     np.array([0,0], dtype=np.float32) for _ in range(index)
                     ]
-            reward += self.dist_from_origin_reward()
-            reward -= self.punish_proximity(obs)
-            reward += self.dont_wiggle_reward(obs)
-            reward -= self.steps_since_green_found * 0.01
+            reward += self.dist_from_origin_reward() * 0.1
+            reward -= self.punish_proximity(obs) * 0.5
+            reward += self.dont_wiggle_reward(obs) * 0.1
+            reward -= self.steps_since_food_found * 0.1
+
+        else:
+            self.steps_since_green_found += 1
 
         return float(reward)
 
@@ -347,6 +355,7 @@ class RoboboGymEnv(gym.Env):
             ) + "| " + self.notes)
         self.notes = ""
         self.steps_to_findall += 1
+        self.prev_area = observation[12]
     
         return observation, reward, done, False, info
 
@@ -359,6 +368,8 @@ class RoboboGymEnv(gym.Env):
         self.robobo.stop_simulation()
         # time.sleep(2)
         self.robobo.play_simulation()
+        self.robobo.set_phone_pan_blocking(177, 100)
+        self.robobo.set_phone_tilt_blocking(100, 100)
 
         self.step_in_episode = 0
         self.nr_collected_food = 0
