@@ -137,7 +137,7 @@ def inference(
     path = f"/root/results/{policy}_{training_steps}_{version}"
     env = RoboboGymEnv(rob)
 
-    n_steps = 512 #  <------------------------
+    n_steps = 256 #  <-------------  validation trajectory length
 
     env.max_steps_in_episode = n_steps
     model = PPO.load(path, env=env)

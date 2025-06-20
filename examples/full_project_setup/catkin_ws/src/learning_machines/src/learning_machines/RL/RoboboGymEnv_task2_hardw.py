@@ -40,7 +40,7 @@ class RoboboGymEnv(gym.Env):
         self.previous_action = np.array([0,0], dtype=np.float32)
 
         # The duration of a step in miliseconds, so each step takes half a second
-        self.timestep_duration = 100
+        self.timestep_duration = 150
 
         self.step_in_episode = 0
         self.global_step = 0
@@ -56,7 +56,7 @@ class RoboboGymEnv(gym.Env):
 
         self.vision_size = 256
         self.total_count_food = 7
-        self.nr_collected_food = 0
+        # self.nr_collected_food = 0
         self.prev_nr_collected_food = 0
 
         self.green_lower = np.array([50, 100, 100])
@@ -237,7 +237,8 @@ class RoboboGymEnv(gym.Env):
     def get_reward(self, obs):
         reward = 0
         green_found = obs[10]
-        food_found = self.nr_collected_food - self.prev_nr_collected_food
+        food_found = False
+        # food_found = self.nr_collected_food - self.prev_nr_collected_food
 
         if food_found > 0:
             self.steps_since_green_found = 0
@@ -315,14 +316,14 @@ class RoboboGymEnv(gym.Env):
     
 
     def terminate(self):
-        if  self.step_in_episode == self.max_steps_in_episode or \
-            self.total_count_food <= self.nr_collected_food:
+        if  self.step_in_episode == self.max_steps_in_episode: # or \
+            # self.total_count_food <= self.nr_collected_food:
             return True
         else:
             return False
 
     def step(self, action):
-        self.nr_collected_food = self.robobo.get_nr_food_collected()
+        # self.nr_collected_food = self.robobo.get_nr_food_collected()
         left_just = 10
         if self.first_step:
             print("Stp#".ljust(left_just) + "".join(
@@ -336,11 +337,11 @@ class RoboboGymEnv(gym.Env):
         self.dist_from_origin_buffer.append(np.clip(action, -0.5, 0.5))
         self.dist_from_origin_buffer.pop(0)
         max_speed = 100
-        left_speed = action[0] * max_speed
-        right_speed = action[1] * max_speed
+        left_speed = int(round(action[0] * max_speed))
+        right_speed = int(round(action[1] * max_speed))
 
         # Send to simulator or hardware
-        self.robobo.move_blocking(left_speed, right_speed, self.timestep_duration)
+        self.robobo.move(left_speed, right_speed, self.timestep_duration)
         
         # Get new obs 
         observation = self.get_obs(action)
@@ -348,7 +349,7 @@ class RoboboGymEnv(gym.Env):
         self.previous_action = action
         done = self.terminate()
         info = self.get_info(observation, reward)
-        self.prev_nr_collected_food = self.nr_collected_food
+        # self.prev_nr_collected_food = self.nr_collected_food
 
         print(str(self.global_step).ljust(left_just) + "".join(
             [self.prnt_frmt[i] + str(round(info[v], 4)).ljust(left_just) for i, v in enumerate(self.prnt_pos)]
@@ -369,7 +370,7 @@ class RoboboGymEnv(gym.Env):
         self.robobo.set_phone_tilt_blocking(100, 100)
 
         self.step_in_episode = 0
-        self.nr_collected_food = 0
+        # self.nr_collected_food = 0
         self.prev_nr_collected_food = 0
         self.steps_to_findall = 0
 
