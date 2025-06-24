@@ -226,7 +226,7 @@ class SimulationRobobo(IRobobo):
         # In CoppeliaSim images are left to right (x-axis), and bottom to top (y-axis)
         # (consistent with the axes of vision sensors, pointing Z outwards, Y up)
         # and color format is RGB triplets, whereas OpenCV uses BGR:
-        img = cv2.flip(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), 0)
+        img = cv2.flip(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), 1)
         return img
 
     def set_phone_pan(

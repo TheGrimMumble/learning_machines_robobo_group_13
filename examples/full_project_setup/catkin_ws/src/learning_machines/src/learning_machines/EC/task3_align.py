@@ -2,7 +2,9 @@ import cv2
 import numpy as np
 import random
 import time
+import pickle
 import os
+import multiprocessing
 from datetime import datetime
 from data_files import FIGURES_DIR
 from robobo_interface import (
@@ -22,6 +24,51 @@ from pathlib import Path
 IMAGE_OUTPUT_DIR = Path(FIGURES_DIR) / "images"
 IMAGE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+
+def save_top_individuals(population, gen, top_k=5, directory=FIGURES_DIR):
+    """
+    Save the top_k genomes and their fitness scores of generation gen.
+    """
+    os.makedirs(directory, exist_ok=True)
+    # Assumes population is sorted by fitness descending
+    for rank, individual in enumerate(population[:top_k], start=1):
+        fitness = individual.fitness
+        filename = os.path.join(
+            directory, f"best_gen_{gen+1}_rank_{rank}_fit_{fitness:.2f}.pkl"
+        )
+        with open(filename, "wb") as f:
+            # store both genome and fitness
+            pickle.dump(
+                {
+                    "genome": individual.genome,
+                    "fitness": fitness,
+                    "red_objects_found": individual.red_objects_found,
+                    "green_objects_found": individual.green_objects_found,
+                    "mutation_step": individual.mutation_step,
+                },
+                f,
+            )
+
+        print(f"Saved gen {gen+1} rank {rank} (fitness={fitness:.2f}) to {filename}")
+
+
+def load_individual(filepath):
+    """
+    Load a genome and fitness from a pickle file and return a new Individual.
+    """
+    with open(os.path.join(FIGURES_DIR, filepath), "rb") as f:
+        data = pickle.load(f)
+    genome = data.get("genome")
+    fitness = data.get("fitness", None)
+    ind = Individual(len(genome))
+    ind.genome = genome
+    ind.fitness = fitness
+    ind.red_objects_found = data.get("red_objects_found", 0)
+    ind.green_objects_found = data.get("green_objects_found", 0)
+    ind.mutation_step = data.get("mutation_step", 0.1)
+    return ind
+
+
 class RedGreenObjectDetector:
     def __init__(self, robot):
         self.robot = robot
@@ -31,7 +78,7 @@ class RedGreenObjectDetector:
             {"lower": np.array([0, 80, 50]), "upper": np.array([10, 255, 255])},
             {"lower": np.array([170, 80, 50]), "upper": np.array([180, 255, 255])},
         ]
-        
+
         self.green_ranges = [
             {"lower": np.array([35, 80, 50]), "upper": np.array([85, 255, 255])},
         ]
@@ -68,17 +115,26 @@ class RedGreenObjectDetector:
 
         detections = []
         current_time = time.time()
-        should_save = False
+        should_save = False  # current_time - self.last_saved_time > 3
+        if should_save:
+            cv2.imwrite(
+                str(IMAGE_OUTPUT_DIR / f"{int(current_time)}.png"),
+                image,
+            )
+            self.last_saved_time = current_time
 
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        
+
         combined_mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
 
         for i, color_range in enumerate(color_ranges):
             mask = cv2.inRange(hsv, color_range["lower"], color_range["upper"])
             if should_save:
                 cv2.imwrite(
-                    str(IMAGE_OUTPUT_DIR / f"{color_name}_mask_range_{i}_{int(current_time)}.png"),
+                    str(
+                        IMAGE_OUTPUT_DIR
+                        / f"{color_name}_mask_range_{i}_{int(current_time)}.png"
+                    ),
                     mask,
                 )
             combined_mask = cv2.bitwise_or(combined_mask, mask)
@@ -86,7 +142,7 @@ class RedGreenObjectDetector:
         kernel = np.ones((5, 5), np.uint8)
         combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
         combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel)
-        
+
         contours, _ = cv2.findContours(
             combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
@@ -112,14 +168,6 @@ class RedGreenObjectDetector:
                 )
 
         detections.sort(key=lambda d: d["confidence"], reverse=True)
-        """
-        if detections:
-            emoji = "🔴" if color_name == "red" else "🟢"
-            print(f"{emoji} {color_name.upper()} OBJECT DETECTED! Found {len(detections)} {color_name} object(s)")
-            best_detection = detections[0]
-            print(f"   Best detection: center=({best_detection['center'][0]}, {best_detection['center'][1]}), "
-                  f"area={best_detection['area']:.0f}, confidence={best_detection['confidence']:.3f}")
-        """
         return detections
 
     def detect_red_objects(self, image):
@@ -164,6 +212,7 @@ class RedGreenObjectDetector:
 
         if image is None:
             image = self.get_current_image()
+            # save image
 
         red_detections = self.detect_red_objects(image)
         green_detections = self.detect_green_objects(image)
@@ -190,17 +239,35 @@ class RedGreenObjectDetector:
             green_a = min(best_green["area"] / 5000.0, 1.0)
             found_green = True
 
-        return [
-            red_x, red_y, red_a,      # Red object data
-            green_x, green_y, green_a, # Green object data
-            front_left, front_center, front_right,
-            front_left_left, front_right_right,
-            back_left, back_right, back_center,
-        ], found_red, found_green
+        # print(f"Red detected: {found_red}, Green detected: {found_green}")
 
-#Just three extra inputs for the red sensors now, also increased hidden layers by 2
+        return (
+            [
+                red_x,
+                red_y,
+                red_a,  # Red object data
+                green_x,
+                green_y,
+                green_a,  # Green object data
+                front_left,
+                front_center,
+                front_right,
+                front_left_left,
+                front_right_right,
+                back_left,
+                back_right,
+                back_center,
+            ],
+            found_red,
+            found_green,
+        )
+
+
+# Just three extra inputs for the red sensors now, also increased hidden layers by 2
 class MultiSensorNeuralNetwork:
-    def __init__(self, input_size=14, hidden_layers=[10], output_size=2):  # Increased input size for green
+    def __init__(
+        self, input_size=14, hidden_layers=[10], output_size=2
+    ):  # Increased input size for green
         self.input_size = input_size
         self.hidden_layers = hidden_layers
         self.output_size = output_size
@@ -240,10 +307,9 @@ class MultiSensorNeuralNetwork:
         for i in range(len(self.weights) - 1):
             x = np.tanh(x.dot(self.weights[i]) + self.biases[i])
 
-        output = np.tanh(
-            x.dot(self.weights[-1]) + self.biases[-1]
-        )  
+        output = np.tanh(x.dot(self.weights[-1]) + self.biases[-1])
         return output.flatten()
+
 
 class Individual:
     def __init__(self, genome_length=None):
@@ -309,14 +375,16 @@ class Individual:
         new.mutation_step = self.mutation_step
         return new
 
-#Just focused on lining up the red object and green area
+
+# Just focused on lining up the red object and green area
 def fitness_evaluation(
     rob: IRobobo,
     individual: Individual,
     detector: RedGreenObjectDetector,
-    initial_pos,           
-    initial_orient,       
+    initial_pos,
+    initial_orient,
     max_time=30.0,
+    is_parallel_worker=False,
 ):
     """
     Simplified fitness: rewards lining up red with green horizontally, and penalizes collisions.
@@ -333,50 +401,222 @@ def fitness_evaluation(
     detector.current_tilt = 109
 
     start_time = time.time()
-    total_frames = 0
-    alignment_sum = 0.0
-    collision_penalty = 0.0
-    collision_count = 0
+
+    # collision_penalty = 0.0
+    # collision_count = 0
+    distance_score = 0
+    no_red_penalty = 0
 
     while time.time() - start_time < max_time:
         ir = rob.read_irs()
-        if any(r is not None and r > 300 for r in ir[:8]):
-            collision_count += 1
-            if collision_count >= 3:
-                collision_penalty += 1.0
-                collision_count = 0
-        else:
-            collision_count = 0
+        # if any(r is not None and r > 300 for r in ir[:8]):
+        #     collision_count += 1
+        #     # if collision_count >= 3:
+        #     #     collision_penalty += 1.0
+        #     #     collision_count = 0
+        # else:
+        #     collision_count = 0
 
         sensor_data, found_red, found_green = detector.get_sensor_data(ir)
+
+        if found_red:
+            individual.red_objects_found += 1
+            distance_score += (rob.get_food_base_distance() * -1) + (
+                rob.get_robot_food_distance() * -1
+            )  # Negative because closer is better
+        else:
+            distance_score += -8  # Penalize if no red object found
+
+        if found_green:
+            individual.green_objects_found += 1
+
         lw, rw = individual.get_motor_commands(sensor_data)
         rob.move_blocking(lw, rw, 300)
 
-        # Score only when both objects visible
-        if found_red and found_green:
-            total_frames += 1
-            rx, ry, ra, gx, gy, ga = sensor_data[:6]
-            nx_red = rx
-            nx_green = gx
-            error = abs(nx_red - nx_green)
-            alignment = max(0.0, 1.0 - error)
-            alignment_sum += alignment
+        base_detects_food = rob.base_detects_food()
+        if base_detects_food:
+            print("Food detected by base!")
+            break
 
     rob.move_blocking(0, 0, 200)
 
     # Compute final fitness: scale alignment to 0-10, subtract penalties
-    avg_alignment = alignment_sum / max(1, total_frames)
-    individual.fitness = avg_alignment * 10.0 - collision_penalty
+    individual.fitness = distance_score
+    individual.survival_time = time.time() - start_time
+
     return individual.fitness
+
+
+def evaluate_individual_worker_continuous(
+    port_offset, individual_queue, result_queue, initial_pos, initial_orient
+):
+    """Continuous worker function that processes individuals from a queue"""
+    import queue
+
+    port = 20000 + port_offset
+
+    # Create robot connection for this worker
+    rob = SimulationRobobo(api_port=port)
+
+    try:
+        # Create detector for this worker
+        detector = RedGreenObjectDetector(rob)
+
+        while True:
+            try:
+                # Get next individual from queue (with timeout to avoid hanging)
+                individual_data, individual_index = individual_queue.get(timeout=1.0)
+
+                # Recreate individual from data
+                individual = Individual()
+                individual.genome = individual_data["genome"]
+                individual.fitness = individual_data["fitness"]
+                individual.survival_time = individual_data["survival_time"]
+                individual.behavior_diversity = individual_data["behavior_diversity"]
+                individual.min_distance = individual_data["min_distance"]
+                individual.red_objects_found = individual_data["red_objects_found"]
+                individual.green_objects_found = individual_data["green_objects_found"]
+                individual.mutation_step = individual_data["mutation_step"]
+
+                # Evaluate the individual
+                fitness = fitness_evaluation(
+                    rob,
+                    individual,
+                    detector,
+                    initial_pos,
+                    initial_orient,
+                    is_parallel_worker=True,
+                )
+
+                print(
+                    f"Individual {individual_index+1} finished on port {port} with fitness {individual.fitness:.2f}, red={individual.red_objects_found}, green={individual.green_objects_found}"
+                )
+
+                # Put result back
+                result_data = {
+                    "index": individual_index,
+                    "genome": individual.genome,
+                    "fitness": individual.fitness,
+                    "survival_time": individual.survival_time,
+                    "behavior_diversity": individual.behavior_diversity,
+                    "min_distance": individual.min_distance,
+                    "red_objects_found": individual.red_objects_found,
+                    "green_objects_found": individual.green_objects_found,
+                    "mutation_step": individual.mutation_step,
+                }
+                result_queue.put(result_data)
+
+            except (queue.Empty, Exception) as e:
+                # No more individuals in queue or timeout - exit
+                break
+
+    finally:
+        # Stop the simulation for this worker
+        try:
+            rob.stop_simulation()
+        except:
+            pass  # Ignore errors when stopping simulation
+
 
 def tournament_selection(population, tournament_size=3):
     tournament = random.sample(population, tournament_size)
     return max(tournament, key=lambda x: x.fitness)
 
-def genetic_algorithm(rob: IRobobo):
-    """Full genetic algorithm implementation with (μ,λ) selection - single threaded"""
-    MU = 10  
-    LAMBDA = 20  
+
+def run_individual_from_file(
+    file_path, rob: IRobobo = None, max_time=3 * 60, is_hardware=False
+):
+    """
+    Runs a single loaded individual in the simulation for up to `max_time` seconds.
+    Logs sensor data to a uniquely named CSV file in the same directory as `file_path`.
+    Writes each row to the CSV file in real-time (not just at the end).
+    """
+    if rob is None:
+        if is_hardware:
+            rob = HardwareRobobo(camera=True)
+        else:
+            rob = SimulationRobobo(api_port=20000)
+            rob.play_simulation()
+        stop_after = True
+    else:
+        stop_after = False
+
+    try:
+        individual = load_individual(file_path)
+        detector = RedGreenObjectDetector(rob)
+
+        rob.set_phone_pan_blocking(177, 100)
+        rob.set_phone_tilt_blocking(109, 100)
+
+        print(f"Running individual from: {file_path}")
+        print("Press Ctrl+C to stop manually.\n")
+
+        start_time = time.time()
+        total_reward = 0.0
+        movement_count = 0
+
+        # Prepare CSV for live logging
+        base_dir = os.path.dirname(file_path)
+        unique_id = uuid.uuid4().hex[:8]
+        csv_filename = os.path.join(base_dir, f"red_green_sensor_log_{unique_id}.csv")
+        csv_headers = (
+            ["timestamp"]
+            + [
+                f"sensor_{i}" for i in range(14)
+            ]  # red_x, red_y, red_a, green_x, green_y, green_a, + 8 IR sensors
+            + ["L_speed", "R_speed", "reward", "red_detected", "green_detected"]
+        )
+
+        with open(csv_filename, mode="w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(csv_headers)  # Write header once
+
+            while time.time() - start_time < max_time:
+                ir = rob.read_irs()
+                sensor_data, found_red, found_green = detector.get_sensor_data(
+                    ir, is_hardware
+                )
+
+                lw, rw = individual.get_motor_commands(sensor_data)
+
+                print(
+                    f"Moving with L_speed={lw}, R_speed={rw}, found_red={found_red}, found_green={found_green}"
+                )
+                rob.move(lw, rw, 300)  # Non-blocking move for continuous evaluation
+
+                # Calculate alignment reward
+                reward = 0.0
+                if found_red and found_green:
+                    rx, gx = sensor_data[0], sensor_data[3]  # red_x, green_x
+                    error = abs(rx - gx)
+                    alignment = max(0.0, 1.0 - error)
+                    reward = alignment
+
+                # Log to CSV
+                timestamp = time.time() - start_time
+                row = (
+                    [timestamp] + sensor_data + [lw, rw, reward, found_red, found_green]
+                )
+                writer.writerow(row)
+
+        rob.move_blocking(0, 0, 50)
+
+        print("\n--- Evaluation Finished ---")
+        print(f"Survival time: {time.time() - start_time:.2f}s")
+        print(f"Sensor log saved to: {csv_filename}")
+
+    except Exception as e:
+        print(f"Error while running individual: {e}")
+
+    finally:
+        if stop_after and not is_hardware:
+            rob.stop_simulation()
+
+
+def genetic_algorithm(rob: IRobobo, parallel=False, num_processes=10):
+    """Full genetic algorithm implementation with (μ,λ) selection - with parallel support"""
+    MU = 10
+    LAMBDA = 20
     GENERATIONS = 100
     CROSSOVER_RATE = 0.7
     MUTATION_RATE = 0.2
@@ -388,13 +628,30 @@ def genetic_algorithm(rob: IRobobo):
     print(f"Generations: {GENERATIONS}")
     print(f"Crossover rate: {CROSSOVER_RATE}, Mutation rate: {MUTATION_RATE}")
     print(f"Tournament size: {TOURNAMENT_SIZE}, Elitism: {ELITISM_COUNT}")
-    print("Features: Red and Green object detection and approach behavior")
+    print("Features: Red and Green object detection and alignment behavior")
     print("HSV Ranges: Red (0-10°, 170-180°), Green (35-85°) - Non-overlapping")
-    print("Running in single-threaded mode")
+    if parallel:
+        print(f"Parallel mode: {num_processes} processes")
+    else:
+        print("Running in single-threaded mode")
 
-    red_green_detector = RedGreenObjectDetector(rob)
-    start_pos = rob.get_position()
-    start_orient = rob.get_orientation()
+    # Get initial position and orientation
+    if parallel:
+        # For parallel mode, get initial position from a temporary connection
+        temp_rob = SimulationRobobo(api_port=20000)
+        try:
+            temp_rob.play_simulation()
+            start_pos = temp_rob.get_position()
+            start_orient = temp_rob.get_orientation()
+            temp_rob.stop_simulation()
+        except Exception as e:
+            # Use default values if we can't get position
+            start_pos = [0.0, 0.0, 0.0]
+            start_orient = 0.0
+    else:
+        red_green_detector = RedGreenObjectDetector(rob)
+        start_pos = rob.get_position()
+        start_orient = rob.get_orientation()
 
     population = [Individual() for _ in range(MU)]
 
@@ -420,20 +677,100 @@ def genetic_algorithm(rob: IRobobo):
         writer.writeheader()
 
     print(f"Evaluating initial population of {MU} individuals...")
-    for i, individual in enumerate(population):
-        fitness = fitness_evaluation(
-            rob,
-            individual,
-            red_green_detector,
-            start_pos,
-            start_orient,
+
+    # Evaluate initial population
+    if parallel:
+        import multiprocessing as mp
+
+        # Create queues for communication
+        individual_queue = mp.Queue()
+        result_queue = mp.Queue()
+
+        print(f"Adding {len(population)} individuals to evaluation queue...")
+        # Add all individuals to the queue
+        for i, individual in enumerate(population):
+            data = {
+                "genome": individual.genome,
+                "fitness": individual.fitness,
+                "survival_time": individual.survival_time,
+                "behavior_diversity": individual.behavior_diversity,
+                "min_distance": individual.min_distance,
+                "red_objects_found": individual.red_objects_found,
+                "green_objects_found": individual.green_objects_found,
+                "mutation_step": individual.mutation_step,
+            }
+            individual_queue.put((data, i))
+
+        # Start worker processes
+        processes = []
+        for port_offset in range(num_processes):
+            p = mp.Process(
+                target=evaluate_individual_worker_continuous,
+                args=(
+                    port_offset,
+                    individual_queue,
+                    result_queue,
+                    start_pos,
+                    start_orient,
+                ),
+            )
+            p.start()
+            processes.append(p)
+
+        print(
+            f"Started {num_processes} worker processes for initial population evaluation"
         )
-        print(f"Individual {i+1}/{MU}: fitness={fitness:.2f}, red={individual.red_objects_found}, green={individual.green_objects_found}")
+
+        # Collect results as they come in
+        results_collected = 0
+        while results_collected < len(population):
+            try:
+                result = result_queue.get(timeout=60)  # 1 minute timeout per individual
+
+                # Update the individual with results
+                idx = result["index"]
+                population[idx].genome = result["genome"]
+                population[idx].fitness = result["fitness"]
+                population[idx].survival_time = result["survival_time"]
+                population[idx].behavior_diversity = result["behavior_diversity"]
+                population[idx].min_distance = result["min_distance"]
+                population[idx].red_objects_found = result["red_objects_found"]
+                population[idx].green_objects_found = result["green_objects_found"]
+                population[idx].mutation_step = result["mutation_step"]
+
+                results_collected += 1
+                print(
+                    f" Individual {idx+1}/{MU} completed - Fitness: {population[idx].fitness:.2f}, Red: {population[idx].red_objects_found}, Green: {population[idx].green_objects_found} ({results_collected}/{len(population)} done)"
+                )
+
+            except Exception as e:
+                print(f"Timeout or error waiting for results: {e}")
+                break
+
+        # Wait for all processes to finish and clean up
+        for p in processes:
+            p.terminate()
+            p.join()
+
+    else:
+        for i, individual in enumerate(population):
+            fitness = fitness_evaluation(
+                rob,
+                individual,
+                red_green_detector,
+                start_pos,
+                start_orient,
+            )
+            print(
+                f"Individual {i+1}/{MU}: fitness={fitness:.2f}, red={individual.red_objects_found}, green={individual.green_objects_found}"
+            )
 
     current_best = max(population, key=lambda x: x.fitness)
     best_individual = current_best.copy()
     best_fitness = current_best.fitness
-    print(f"Initial best fitness: {best_fitness:.2f}, red={best_individual.red_objects_found}, green={best_individual.green_objects_found}")
+    print(
+        f"Initial best fitness: {best_fitness:.2f}, red={best_individual.red_objects_found}, green={best_individual.green_objects_found}"
+    )
 
     for generation in range(GENERATIONS):
         print(f"\n--- Generation {generation + 1}/{GENERATIONS} ---")
@@ -459,34 +796,123 @@ def genetic_algorithm(rob: IRobobo):
 
         print(f"Evaluating {len(offspring)} offspring...")
 
-        for i, individual in enumerate(offspring):
-            if i < ELITISM_COUNT:
-                continue
-            fitness = fitness_evaluation(
-                rob,
-                individual,
-                red_green_detector,
-                start_pos,
-                start_orient,
-            )
-            if (i + 1) % 10 == 0 or i == len(offspring) - 1:
-                print(f"Offspring {i+1}/{len(offspring)}: fitness={fitness:.2f}, red={individual.red_objects_found}, green={individual.green_objects_found}")
+        if parallel:
+            import multiprocessing as mp
+
+            # Create queues for communication
+            individual_queue = mp.Queue()
+            result_queue = mp.Queue()
+
+            # Add all offspring to the queue (skip elite individuals)
+            for i, individual in enumerate(offspring):
+                if i < ELITISM_COUNT:
+                    continue  # Skip evaluation for elite individuals
+                data = {
+                    "genome": individual.genome,
+                    "fitness": individual.fitness,
+                    "survival_time": individual.survival_time,
+                    "behavior_diversity": individual.behavior_diversity,
+                    "min_distance": individual.min_distance,
+                    "red_objects_found": individual.red_objects_found,
+                    "green_objects_found": individual.green_objects_found,
+                    "mutation_step": individual.mutation_step,
+                }
+                individual_queue.put((data, i))
+
+            # Start worker processes
+            processes = []
+            for port_offset in range(num_processes):
+                p = mp.Process(
+                    target=evaluate_individual_worker_continuous,
+                    args=(
+                        port_offset,
+                        individual_queue,
+                        result_queue,
+                        start_pos,
+                        start_orient,
+                    ),
+                )
+                p.start()
+                processes.append(p)
+
+            # Collect results as they come in
+            results_collected = 0
+            offspring_to_evaluate = len(offspring) - ELITISM_COUNT
+            while results_collected < offspring_to_evaluate:
+                try:
+                    result = result_queue.get(
+                        timeout=60
+                    )  # 1 minute timeout per individual
+
+                    # Update the individual with results
+                    idx = result["index"]
+                    offspring[idx].genome = result["genome"]
+                    offspring[idx].fitness = result["fitness"]
+                    offspring[idx].survival_time = result["survival_time"]
+                    offspring[idx].behavior_diversity = result["behavior_diversity"]
+                    offspring[idx].min_distance = result["min_distance"]
+                    offspring[idx].red_objects_found = result["red_objects_found"]
+                    offspring[idx].green_objects_found = result["green_objects_found"]
+                    offspring[idx].mutation_step = result["mutation_step"]
+
+                    results_collected += 1
+                    if (
+                        results_collected
+                    ) % 10 == 0 or results_collected == offspring_to_evaluate:
+                        print(
+                            f" Offspring {results_collected}/{offspring_to_evaluate} completed - Fitness: {offspring[idx].fitness:.2f}, Red: {offspring[idx].red_objects_found}, Green: {offspring[idx].green_objects_found}"
+                        )
+
+                except Exception as e:
+                    print(f"Timeout or error waiting for results: {e}")
+                    break
+
+            # Wait for all processes to finish and clean up
+            for p in processes:
+                p.terminate()
+                p.join()
+
+            print(f"Generation {generation+1} evaluation complete!")
+        else:
+            for i, individual in enumerate(offspring):
+                if i < ELITISM_COUNT:
+                    continue
+                fitness = fitness_evaluation(
+                    rob,
+                    individual,
+                    red_green_detector,
+                    start_pos,
+                    start_orient,
+                )
+                if (i + 1) % 10 == 0 or i == len(offspring) - 1:
+                    print(
+                        f"Offspring {i+1}/{len(offspring)}: fitness={fitness:.2f}, red={individual.red_objects_found}, green={individual.green_objects_found}"
+                    )
 
         offspring.sort(key=lambda x: x.fitness, reverse=True)
         population = offspring[:MU]
+
+        # Save top individuals
+        save_top_individuals(population, generation, top_k=5)
 
         current_best = population[0]
         if current_best.fitness > best_fitness:
             best_individual = current_best.copy()
             best_fitness = current_best.fitness
-            print(f"NEW BEST in generation {generation + 1}: fitness={best_fitness:.2f}, red={best_individual.red_objects_found}, green={best_individual.green_objects_found}")
+            print(
+                f"NEW BEST in generation {generation + 1}: fitness={best_fitness:.2f}, red={best_individual.red_objects_found}, green={best_individual.green_objects_found}"
+            )
 
         avg_fitness = sum(ind.fitness for ind in population) / len(population)
         print(f"Generation {generation + 1} stats:")
-        print(f"  Best: {population[0].fitness:.2f} (red: {population[0].red_objects_found}, green: {population[0].green_objects_found})")
+        print(
+            f"  Best: {population[0].fitness:.2f} (red: {population[0].red_objects_found}, green: {population[0].green_objects_found})"
+        )
         print(f"  Average: {avg_fitness:.2f}")
         print(f"  Worst: {population[-1].fitness:.2f}")
-        print(f"  Overall best: {best_fitness:.2f} (red: {best_individual.red_objects_found}, green: {best_individual.green_objects_found})")
+        print(
+            f"  Overall best: {best_fitness:.2f} (red: {best_individual.red_objects_found}, green: {best_individual.green_objects_found})"
+        )
 
         with open(csv_path, "a", newline="") as csvfile:
             writer = csv.DictWriter(
@@ -517,20 +943,41 @@ def genetic_algorithm(rob: IRobobo):
     print(f"Red objects found by best: {best_individual.red_objects_found}")
     print(f"Green objects found by best: {best_individual.green_objects_found}")
 
-    return best_individual
+    return None, best_individual
 
-def run_neuroevolution(rob: IRobobo = None, is_hardware=False):
-    """Run neuroevolution with single-threaded genetic algorithm"""
-    if isinstance(rob, SimulationRobobo):
+
+def run_neuroevolution(
+    rob: IRobobo = None,
+    parallel=False,
+    num_processes=10,
+    file_path=None,
+    is_hardware=False,
+):
+    """Run neuroevolution with optional parallel processing and file loading"""
+    if parallel:
+        print("Starting parallel neuroevolution with multiple CoppeliaSim instances")
+        print("Each worker will manage its own simulation instance")
+    elif isinstance(rob, SimulationRobobo):
         rob.play_simulation()
 
-    best_individual = genetic_algorithm(rob)
+    if file_path is not None:
+        run_individual_from_file(file_path, rob, is_hardware=is_hardware)
+        return None, None
+    else:
+        save_dir, best_individual = genetic_algorithm(rob, parallel, num_processes)
 
-    if isinstance(rob, SimulationRobobo):
-        rob.stop_simulation()
+        if not parallel and isinstance(rob, SimulationRobobo):
+            rob.stop_simulation()
 
-    return best_individual
+        return save_dir, best_individual
 
-def run_all_actions(rob: IRobobo = None, is_hardware=False):
+
+def run_all_actions(
+    rob: IRobobo = None,
+    parallel=False,
+    num_processes=10,
+    file_path=None,
+    is_hardware=False,
+):
     """Main entry point"""
-    return run_neuroevolution(rob, is_hardware)
+    return run_neuroevolution(rob, parallel, num_processes, file_path, is_hardware)

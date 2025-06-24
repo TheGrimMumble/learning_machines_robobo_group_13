@@ -226,7 +226,7 @@ class SimulationRobobo(IRobobo):
         # In CoppeliaSim images are left to right (x-axis), and bottom to top (y-axis)
         # (consistent with the axes of vision sensors, pointing Z outwards, Y up)
         # and color format is RGB triplets, whereas OpenCV uses BGR:
-        img = cv2.flip(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), 0)
+        img = cv2.flip(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), 1)
         return img
 
     def set_phone_pan(
@@ -440,6 +440,44 @@ class SimulationRobobo(IRobobo):
             bytearray(),
         )
         return ints[0]
+
+    def get_food_base_distance(self) -> float:
+        """Get the 3D distance between the food and base objects from anywhere in the environment.
+
+        This only works in the simulation.
+        Trivially doesn't work when the simulation does not have food or base objects.
+
+        Returns:
+            float: The Euclidean distance between food and base positions
+        """
+        _ints, floats, _strings, _buffer = self._sim.callScriptFunction(
+            "remote_get_food_base_distance",
+            self._food_script,
+            [],
+            [],
+            [],
+            bytearray(),
+        )
+        return floats[0]
+
+    def get_robot_food_distance(self) -> float:
+        """Get the 3D distance between the robot and food objects from anywhere in the environment.
+
+        This only works in the simulation.
+        Trivially doesn't work when the simulation does not have food objects.
+
+        Returns:
+            float: The Euclidean distance between robot and food positions
+        """
+        _ints, floats, _strings, _buffer = self._sim.callScriptFunction(
+            "remote_get_robot_food_distance",
+            self._food_script,
+            [],
+            [],
+            [],
+            bytearray(),
+        )
+        return floats[0]
 
     def get_position(self) -> Position:
         """Get the position of the Robobo (Relative to the world)

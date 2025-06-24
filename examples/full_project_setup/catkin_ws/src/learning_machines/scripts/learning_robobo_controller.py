@@ -2,7 +2,7 @@
 import sys
 import multiprocessing
 from robobo_interface import SimulationRobobo, HardwareRobobo
-from learning_machines.EC.evo_task2 import run_all_actions
+from learning_machines.EC.task3_align import run_all_actions
 
 
 def run(port_offset: int) -> None:

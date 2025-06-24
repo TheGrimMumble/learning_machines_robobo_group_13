@@ -2,13 +2,13 @@
 
 # Path to the scene file
 # SCENE="./scenes/arena_obstacles_middleSceneOnly.ttt"
-SCENE="./scenes/arena_approach_v2.ttt"
+SCENE="./scenes/arena_push_easy_4.ttt"
 
 # Path to the script that starts CoppeliaSim
 SCRIPT="./scripts/start_coppelia_sim.zsh"
 
 # Number of instances to run
-NUM_INSTANCES=1
+NUM_INSTANCES=30
 
 # Base port number
 BASE_PORT=20000
