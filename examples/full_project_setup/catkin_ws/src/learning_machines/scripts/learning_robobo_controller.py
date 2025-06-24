@@ -30,7 +30,7 @@ if __name__ == "__main__":
         #     is_hardware = True
         # elif sys.argv[2] == "--simulation":
         #     is_hardware = False
-        is_hardware = False
+        is_hardware = True
 
         file_path = sys.argv[2]
         rob = None
