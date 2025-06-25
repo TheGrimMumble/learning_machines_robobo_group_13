@@ -479,6 +479,18 @@ class SimulationRobobo(IRobobo):
 
         pos = self._sim.getObjectPosition(self._base, self._sim.handle_world)
         return Position(*pos)
+    
+    def get_food_position(self) -> Position:
+        """Get the position of the food to deliver food at.
+
+        This only works in the simulation.
+        Trivially doesn't work when the simulation does not have food.
+        """
+        if self._food is None:
+            raise AttributeError("Scene does not have food")
+
+        pos = self._sim.getObjectPosition(self._food, self._sim.handle_world)
+        return Position(*pos)
 
     def base_detects_food(self) -> bool:
         """Get whether the base detects food on top of it.
@@ -542,8 +554,10 @@ class SimulationRobobo(IRobobo):
             self._base_script = None
 
         try:
+            self._food = self._get_object("/Food")
             self._food_script = self._get_childscript("/Food")
         except AttributeError:
+            self._food = None
             self._food_script = None
 
     def _get_object(self, name: str) -> int:

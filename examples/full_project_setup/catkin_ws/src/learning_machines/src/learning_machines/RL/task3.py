@@ -160,5 +160,112 @@ def inference(
                             mean_reward])
             
 
+def calibrate_camera(robobo,
+                     vision_size,
+                     kernel,
+                     blue_lower=np.array([90, 50, 50]),
+                     blue_upper=np.array([130, 255, 255]),
+                     pan_gain=0.25,
+                     tilt_gain=0.25,
+                     max_attempts=24):
+    """
+    Pan/tilt until two blue bars are centered in the lower-middle.
+    """
+    robobo.set_phone_tilt_blocking(109, 100) # max
+    robobo.set_phone_pan_blocking(11, 100) # default: 179
+    for _ in range(max_attempts):
+        # 1) grab & preprocess
+        frame = robobo.read_image_front()
+        frame = cv2.resize(frame, (vision_size, vision_size))
+        hsv   = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
+        # 2) blue mask + clean
+        blue_mask = cv2.inRange(hsv, blue_lower, blue_upper)
+        blue_mask = cv2.morphologyEx(blue_mask, cv2.MORPH_OPEN,  kernel, iterations=1)
+        blue_mask = cv2.morphologyEx(blue_mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+        # 3) find blue contours and pick the two tallest bars
+        contours, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        bars = []
+        for c in contours:
+            x, y, w, h = cv2.boundingRect(c)
+            if h * w > 0.01 * vision_size**2:
+                bars.append((x, y, w, h))
+        if len(bars) < 2:
+            tilt = 332 // max_attempts
+            tilt_now = robobo.read_phone_pan()
+            robobo.set_phone_pan_blocking(min(343, tilt_now + tilt), 100)
+            time.sleep(0.1)
+            continue
+
+        # keep the two tallest bars
+        bars = sorted(bars, key=lambda b: b[3], reverse=True)[:2]
+        centers = [(x + w/2, y + h/2) for x, y, w, h in bars]
+        avg_cx  = sum(c[0] for c in centers) / 2.0
+        avg_cy  = sum(c[1] for c in centers) / 2.0
+
+        # compute offsets to target
+        target_cx = vision_size / 2 # want the blue bars centered
+        target_cy = vision_size * 0.90 # want the blue bars taking up 10% of vertical space
+        dx = avg_cx - target_cx
+        dy = avg_cy - target_cy
+
+        # check success
+        # print("dx", dx)
+        if abs(dx) > 2:
+            pan  =  max(2, int(round(pan_gain * dx)))
+            # print("pan", pan)
+            pan_now = robobo.read_phone_pan()
+            robobo.set_phone_pan_blocking(min(343, pan_now + pan), 100)
+            time.sleep(0.1)
+        elif abs(dy) > 10:
+            # print('dy', dy)
+            tilt =  max(2, int(round(tilt_gain * dy)))
+            # print("tilt", tilt)
+            tilt_now = robobo.read_phone_tilt()
+            robobo.set_phone_tilt_blocking(min(109, tilt_now + tilt), 100)
+            time.sleep(0.1)
+        else:
+            return True
+
+    return False
+
+
+def print_irs():
+    prnt_pos = [
+        "irBL",
+        "irBM",
+        "irBR",
+        "irFL1",
+        "irFL2",
+        "irFM",
+        "irFR2",
+        "irFR1"
+        ]
+    prnt_frmt = [
+        "|   ", "", "",
+        "|FL1   ", "", "", "", "",
+        "FR1|"
+        ]
+    left_just = 10
+    print("Stp#".ljust(left_just) + "".join(
+        [prnt_frmt[i] + k.ljust(left_just) for i, k in enumerate(prnt_pos)]
+        ))
+    global_step = 1
+    while not rob.base_detects_food():
+        obs = rob.read_irs()
+        info = {
+            "irBL": obs[1],
+            "irBM": obs[6],
+            "irBR": obs[0],
+            "irFL1": obs[5],
+            "irFL2": obs[3],
+            "irFM": obs[4],
+            "irFR2": obs[2],
+            "irFR1": obs[7]
+            }
+        print(str(global_step).ljust(left_just) + "".join(
+            [prnt_frmt[i] + str(round(info[v], 4)).ljust(left_just) for i, v in enumerate(prnt_pos)]
+            ))
+        global_step += 1
 

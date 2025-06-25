@@ -10,125 +10,22 @@ from datetime import datetime
 from robobo_interface import SimulationRobobo, HardwareRobobo
 from learning_machines import run_all_actions
 # from learning_machines.task0 import run_test_task0_actions
+from learning_machines.RL.RoboboGymEnv_task3_sim import RoboboGymEnv
 from learning_machines.RL.task3 import (
     train_model,
     inference,
     continue_training,
+    calibrate_camera,
+    print_irs
     )
 from learning_machines.RL.task2_hardw import (
     hw_inference
     )
+from robobo_interface import Orientation
 
 
 
-def calibrate_camera(robobo,
-                     vision_size,
-                     kernel,
-                     blue_lower=np.array([90, 50, 50]),
-                     blue_upper=np.array([130, 255, 255]),
-                     pan_gain=0.25,
-                     tilt_gain=0.25,
-                     max_attempts=24):
-    """
-    Pan/tilt until two blue bars are centered in the lower-middle.
-    """
-    robobo.set_phone_tilt_blocking(109, 100) # max
-    robobo.set_phone_pan_blocking(11, 100) # default: 179
-    for _ in range(max_attempts):
-        # 1) grab & preprocess
-        frame = robobo.read_image_front()
-        frame = cv2.resize(frame, (vision_size, vision_size))
-        hsv   = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-        # 2) blue mask + clean
-        blue_mask = cv2.inRange(hsv, blue_lower, blue_upper)
-        blue_mask = cv2.morphologyEx(blue_mask, cv2.MORPH_OPEN,  kernel, iterations=1)
-        blue_mask = cv2.morphologyEx(blue_mask, cv2.MORPH_CLOSE, kernel, iterations=1)
-
-        # 3) find blue contours and pick the two tallest bars
-        contours, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        bars = []
-        for c in contours:
-            x, y, w, h = cv2.boundingRect(c)
-            if h * w > 0.01 * vision_size**2:
-                bars.append((x, y, w, h))
-        if len(bars) < 2:
-            tilt = 332 // max_attempts
-            tilt_now = robobo.read_phone_pan()
-            robobo.set_phone_pan_blocking(min(343, tilt_now + tilt), 100)
-            time.sleep(0.1)
-            continue
-
-        # keep the two tallest bars
-        bars = sorted(bars, key=lambda b: b[3], reverse=True)[:2]
-        centers = [(x + w/2, y + h/2) for x, y, w, h in bars]
-        avg_cx  = sum(c[0] for c in centers) / 2.0
-        avg_cy  = sum(c[1] for c in centers) / 2.0
-
-        # compute offsets to target
-        target_cx = vision_size / 2 # want the blue bars centered
-        target_cy = vision_size * 0.90 # want the blue bars taking up 10% of vertical space
-        dx = avg_cx - target_cx
-        dy = avg_cy - target_cy
-
-        # check success
-        # print("dx", dx)
-        if abs(dx) > 2:
-            pan  =  max(2, int(round(pan_gain * dx)))
-            # print("pan", pan)
-            pan_now = robobo.read_phone_pan()
-            robobo.set_phone_pan_blocking(min(343, pan_now + pan), 100)
-            time.sleep(0.1)
-        elif abs(dy) > 10:
-            # print('dy', dy)
-            tilt =  max(2, int(round(tilt_gain * dy)))
-            # print("tilt", tilt)
-            tilt_now = robobo.read_phone_tilt()
-            robobo.set_phone_tilt_blocking(min(109, tilt_now + tilt), 100)
-            time.sleep(0.1)
-        else:
-            return True
-
-    return False
-
-
-def print_irs():
-    prnt_pos = [
-        "irBL",
-        "irBM",
-        "irBR",
-        "irFL1",
-        "irFL2",
-        "irFM",
-        "irFR2",
-        "irFR1"
-        ]
-    prnt_frmt = [
-        "|   ", "", "",
-        "|FL1   ", "", "", "", "",
-        "FR1|"
-        ]
-    left_just = 10
-    print("Stp#".ljust(left_just) + "".join(
-        [prnt_frmt[i] + k.ljust(left_just) for i, k in enumerate(prnt_pos)]
-        ))
-    global_step = 1
-    while not rob.base_detects_food():
-        obs = rob.read_irs()
-        info = {
-            "irBL": obs[1],
-            "irBM": obs[6],
-            "irBR": obs[0],
-            "irFL1": obs[5],
-            "irFL2": obs[3],
-            "irFM": obs[4],
-            "irFR2": obs[2],
-            "irFR1": obs[7]
-            }
-        print(str(global_step).ljust(left_just) + "".join(
-            [prnt_frmt[i] + str(round(info[v], 4)).ljust(left_just) for i, v in enumerate(prnt_pos)]
-            ))
-        global_step += 1
 
 
 
@@ -145,6 +42,7 @@ if __name__ == "__main__":
         )
     elif sys.argv[1] == "--testing":
         rob = SimulationRobobo()
+        env = RoboboGymEnv(rob)
         rob.stop_simulation()
         time.sleep(0.5)
         rob.play_simulation()
@@ -161,7 +59,57 @@ if __name__ == "__main__":
         #     print("Failed!")
         # image = rob.read_image_front()
         # cv2.imwrite('/root/results/front_camera_image_post.png', image)
-        print_irs()
+        # print_irs()
+
+        # image = rob.read_image_front()
+        # green_found, green_cx, green_area, red_found, red_cx, red_area, red_captured = env.detect_objects(image)
+        # while not red_captured:
+        #     (food_dist, food_yaw), (base_dist, base_yaw) = env.get_relative_targets()
+        #     ori = rob.get_orientation()
+        #     food_ori = Orientation(yaw=food_yaw)
+        #     ori.yaw = food_ori.yaw
+        #     pos = rob.get_position()
+        #     rob.set_position(pos, ori)
+        #     time.sleep(0.5)
+        #     rob.move_blocking(100, 100, 250)
+        #     image = rob.read_image_front()
+        #     green_found, green_cx, green_area, red_found, red_cx, red_area, red_captured = env.detect_objects(image)
+        while not rob.base_detects_food():
+            (food_dist, food_yaw), (base_dist, base_yaw) = env.get_relative_targets()
+            food_pos = rob.get_food_position()
+            print(f"food_pos: x-{food_pos.x:.2f}, y-{food_pos.y:.2f}")
+            # print(f"food_dist: {food_dist}")
+            k_turn = 20  # turning scale
+            k_fwd = 20   # forward speed
+
+            alignment = np.cos(food_yaw)
+            forward = k_fwd * max(0, alignment)
+            turn = (food_yaw / np.pi) * k_turn
+
+            left_speed = forward - turn
+            right_speed = forward + turn
+
+
+            rob.move_blocking(left_speed, right_speed, 250)
+
+        print("success!")
+        # try:
+        #     while True:
+        #         rob.move_blocking(10, -10, 250)  # slow rotation
+
+        #         pos = rob.get_position()
+        #         ori = rob.get_orientation()
+
+        #         print(f"Position: ({pos.x:.2f}, {pos.y:.2f}, {pos.z:.2f}), "
+        #             f"Yaw: {np.rad2deg(ori.yaw):.2f}°, "
+        #             f"Pitch: {np.rad2deg(ori.pitch):.2f}°, "
+        #             f"Roll: {np.rad2deg(ori.roll):.2f}°")
+                
+        #         time.sleep(0.25)
+
+        # except KeyboardInterrupt:
+        #     print("Stopped by user")
+
 
 
     elif sys.argv[1] == "--hardware":

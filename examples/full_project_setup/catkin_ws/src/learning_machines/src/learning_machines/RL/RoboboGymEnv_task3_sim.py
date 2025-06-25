@@ -282,8 +282,43 @@ class RoboboGymEnv(gym.Env):
         if round(reward, 2) != 0.00:
             self.notes += f"Apprch: {reward:.2f} "
         return reward
-    
 
+
+    def get_relative_targets(self):
+        def compute_relative(pos_from, pos_to, yaw_from):
+            delta = np.array([pos_to.x - pos_from.x, pos_to.y - pos_from.y])
+            distance = np.linalg.norm(delta)
+
+            # angle_to_target = np.arctan2(delta[1], delta[0])
+            angle_to_target = np.arctan2(delta[1], delta[0]) - (np.pi / 2)
+
+            # Normalize yaw offset to [-π, π]
+            # yaw_offset = yaw_from + angle_to_target
+            # yaw_offset = (yaw_offset + np.pi) % (2 * np.pi) - np.pi
+            # robustly wrap into [-π, π]
+            raw = angle_to_target + yaw_from
+            yaw_offset = np.arctan2(np.sin(raw), np.cos(raw))
+
+            return distance, yaw_offset
+
+        pos = self.robobo.get_position()
+        ori = self.robobo.get_orientation()
+        # Adjust position by offset in robot's forward direction
+        # Assume the offset is 0.05 meters (5cm) forward — tweak as needed
+        # offset_distance = 0.5
+        # pos.x += offset_distance * np.cos(ori.pitch)  # forward along heading
+        # pos.y += offset_distance * np.sin(ori.pitch)
+
+
+        food = self.robobo.get_food_position()
+        base = self.robobo.get_base_position()
+
+        food_info = compute_relative(pos, food, ori.pitch)
+        base_info = compute_relative(pos, base, ori.pitch)
+
+        return food_info, base_info
+
+    
     def get_reward(self, obs):
         reward = 0
         irs = obs[:8]
