@@ -103,6 +103,15 @@ class Position:
                 and isclose(self.z, __o.z, abs_tol=TOLERANCE)
             )
         return NotImplemented
+    
+    def __sub__(self, other: 'Position') -> 'Position':
+        if isinstance(other, Position):
+            return Position(
+                self.x - other.x,
+                self.y - other.y,
+                self.z - other.z
+            )
+        return NotImplemented
 
 
 @dataclass

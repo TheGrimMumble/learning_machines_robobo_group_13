@@ -10,10 +10,11 @@ from datetime import datetime
 from robobo_interface import SimulationRobobo, HardwareRobobo
 from learning_machines import run_all_actions
 # from learning_machines.task0 import run_test_task0_actions
-from learning_machines.RL.task3 import (
+from learning_machines.RL.task2 import (
     train_model,
     inference,
     continue_training,
+    test_robot_sensors
     )
 from learning_machines.RL.task2_hardw import (
     hw_inference
@@ -92,50 +93,13 @@ def calibrate_camera(robobo,
     return False
 
 
-def print_irs():
-    prnt_pos = [
-        "irBL",
-        "irBM",
-        "irBR",
-        "irFL1",
-        "irFL2",
-        "irFM",
-        "irFR2",
-        "irFR1"
-        ]
-    prnt_frmt = [
-        "|   ", "", "",
-        "|FL1   ", "", "", "", "",
-        "FR1|"
-        ]
-    left_just = 10
-    print("Stp#".ljust(left_just) + "".join(
-        [prnt_frmt[i] + k.ljust(left_just) for i, k in enumerate(prnt_pos)]
-        ))
-    global_step = 1
-    while not rob.base_detects_food():
-        obs = rob.read_irs()
-        info = {
-            "irBL": obs[1],
-            "irBM": obs[6],
-            "irBR": obs[0],
-            "irFL1": obs[5],
-            "irFL2": obs[3],
-            "irFM": obs[4],
-            "irFR2": obs[2],
-            "irFR1": obs[7]
-            }
-        print(str(global_step).ljust(left_just) + "".join(
-            [prnt_frmt[i] + str(round(info[v], 4)).ljust(left_just) for i, v in enumerate(prnt_pos)]
-            ))
-        global_step += 1
 
 
 
 if __name__ == "__main__":
     total_time_steps = 512*4 #  <------------------------
     policy = 'ppo'
-    version = 'task3_v03'
+    version = 'task2_v03'
 
     # You can do better argument parsing than this!
     if len(sys.argv) < 2:
@@ -151,18 +115,16 @@ if __name__ == "__main__":
         time.sleep(0.5)
         # rob.set_phone_pan_blocking(177, 100)
         # rob.set_phone_tilt_blocking(100, 100)
-        # image = rob.read_image_front()
-        # cv2.imwrite('/root/results/front_camera_image_pre.png', image)
-        # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        image = rob.read_image_front()
+        cv2.imwrite('/root/results/front_camera_image_pre.png', image)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         # print("pan:", rob.read_phone_pan())
-        # if calibrate_camera(rob, 256, kernel):
-        #     print("Success!")
-        # else:
-        #     print("Failed!")
-        # image = rob.read_image_front()
-        # cv2.imwrite('/root/results/front_camera_image_post.png', image)
-        print_irs()
-
+        if calibrate_camera(rob, 256, kernel):
+            print("Success!")
+        else:
+            print("Failed!")
+        image = rob.read_image_front()
+        cv2.imwrite('/root/results/front_camera_image_post.png', image)
 
     elif sys.argv[1] == "--hardware":
         rob = HardwareRobobo(camera=True)
@@ -178,23 +140,12 @@ if __name__ == "__main__":
         time.sleep(0.5)
         rob.play_simulation()
         time.sleep(0.5)
+        rob.set_phone_pan_blocking(177, 100)
+        rob.set_phone_tilt_blocking(100, 100)
 
-        # with open(f"/root/results/{policy}_{version}.csv", "w") as f:
-        #     writer = csv.writer(f)
-        #     writer.writerow([
-        #          "Step #",
-        #          "Left Speed",
-        #          "Right Speed",
-        #          "Collision",
-        #          "#Stps to red",
-        #          "#Red found",
-        #          "#Red lost",
-        #          "#Red captured",
-        #          "#Red uncaptured",
-        #          "#Stps to green",
-        #          "#Green found",
-        #          "#Green lost",
-        #          "Mean reward"])
+        with open(f"/root/results/{policy}_{version}.csv", "w") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Step #", "Left Speed", "Right Speed", "Close Call", "Collision", "Steps to find all", "Mean reward"])
 
         # model, env = train_model(
         #     rob,
@@ -203,23 +154,23 @@ if __name__ == "__main__":
         #     version = version
         #     )
 
-        resume_model_at = 221184
+        resume_model_at = 40960
         model, env = continue_training(
                             rob,
-                            f"/root/results/{policy}_{resume_model_at}_{version}"
+                            f"/root/results/{policy}_{resume_model_at}_{version}",
+                            total_time_steps=total_time_steps,
+                            policy=policy,
+                            version=version
                             )
         env.global_step = resume_model_at
         
-        for i in range(int(resume_model_at // total_time_steps - 1), 151):
+        for i in range(int(resume_model_at // total_time_steps - 1), 51):
             # Retry until it succeeds
             while True:
                 print(f"Starting training at step {total_time_steps * (i + 1)}:")
                 try:
-                    rob.stop_simulation()
-                    time.sleep(0.1)
-                    rob.play_simulation()
-                    time.sleep(0.1)
-                    rob.set_phone_tilt_blocking(109, 100)
+                    rob.set_phone_pan_blocking(177, 100)
+                    rob.set_phone_tilt_blocking(100, 100)
                     model.learn(
                         total_timesteps=total_time_steps,
                         reset_num_timesteps=False
@@ -236,26 +187,25 @@ if __name__ == "__main__":
                         f.write(f"[{timestamp}]\n")
                         traceback.print_exc(file=f)
                         f.write(f"\n\n\n")
-            for _ in range(3):
-                while True:
-                    print(f"Starting inference at step {total_time_steps * (i + 2)}:")
-                    try:
-                        rob.set_phone_tilt_blocking(109, 100)
-                        inference(
-                            rob,
-                            policy,
-                            total_time_steps * (i + 2),
-                            version
-                        )
-                        print("Inference successful")
-                        break  
-                    except Exception as e:
-                        print(f"inference failed at iteration {i+1}: {e}, retrying...")
-                        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        with open("/root/results/error_log_inference.txt", "a") as f:
-                            f.write(f"[{timestamp}]\n")
-                            traceback.print_exc(file=f)
-                            f.write(f"\n\n\n")
+
+            while True:
+                print(f"Starting inference at step {total_time_steps * (i + 2)}:")
+                try:
+                    inference(
+                        rob,
+                        policy,
+                        total_time_steps * (i + 2),
+                        version
+                    )
+                    print("Inference successful")
+                    break  
+                except Exception as e:
+                    print(f"inference failed at iteration {i+1}: {e}, retrying...")
+                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    with open("/root/results/error_log_inference.txt", "a") as f:
+                        f.write(f"[{timestamp}]\n")
+                        traceback.print_exc(file=f)
+                        f.write(f"\n\n\n")
 
     else:
         raise ValueError(f"{sys.argv[1]} is not a valid argument.")
