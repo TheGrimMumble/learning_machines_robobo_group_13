@@ -83,7 +83,7 @@ class RedGreenObjectDetector:
             {"lower": np.array([35, 80, 50]), "upper": np.array([85, 255, 255])},
         ]
 
-        self.min_contour_area = 300
+        self.min_contour_area = 20
         self.max_contour_area = 50000000
         self.debug_mode = False
 
@@ -212,6 +212,9 @@ class RedGreenObjectDetector:
 
         if image is None:
             image = self.get_current_image()
+            if is_hardware:
+                # print("Flipping")
+                image = cv2.flip(image, 0)
             # save image
 
         red_detections = self.detect_red_objects(image)
@@ -225,9 +228,8 @@ class RedGreenObjectDetector:
             h, w = image.shape[:2]
             red_x = (cx / w) * 2 - 1
             red_y = (cy / h) * 2 - 1
-            red_a = min(best_red["area"] / 5000.0, 1.0)
+            red_a = min(best_red["area"] / 20000.0, 1.0)
             found_red = True
-
         green_x, green_y, green_a = 0.0, 0.0, 0.0
         found_green = False
         if green_detections:
@@ -405,43 +407,69 @@ def fitness_evaluation(
     # collision_penalty = 0.0
     # collision_count = 0
     distance_score = 0
-    no_red_penalty = 0
+    forward_speed_reward = 0
+    prev_food_robot_distance = None
+    prev_food_base_distance = None
 
     while time.time() - start_time < max_time:
         ir = rob.read_irs()
         # if any(r is not None and r > 300 for r in ir[:8]):
         #     collision_count += 1
-        #     # if collision_count >= 3:
-        #     #     collision_penalty += 1.0
-        #     #     collision_count = 0
+        #     if collision_count >= 3:
+        #         # collision_penalty += 1.0
+        #         # collision_count = 0
         # else:
         #     collision_count = 0
+        # detect stuck in wall by distance towards wall
 
         sensor_data, found_red, found_green = detector.get_sensor_data(ir)
 
+        lw, rw = individual.get_motor_commands(sensor_data)
+
+        # if found red
+        #   if (distance > 0.16):
+        #       reward for going forward
+        #   else: (it has the object)
+        #       got object reward (+1)
+        #       if found green:
+        #           reward for going forward and decreasing distance
+        food_robot_distance = rob.get_robot_food_distance()
+        food_base_distance = rob.get_food_base_distance()
+        robot_has_food = food_robot_distance < 0.17
+        red_green_score = 0
+        # if found_red:
+        #     distance_score += food_robot_distance * -1 + food_base_distance * -1
+        #     speed_norm = max(0.0, (lw + rw) / 200.0)
+        #     turn_penalty = abs(lw - rw) / 200.0
+        #     forwardness = 1.0 - turn_penalty
+        #     alignment_red = 1.0 - abs(sensor_data[0] - 0.5) * 2
+        #     forward_speed_reward += speed_norm * forwardness * alignment_red
+        #     if robot_has_food and found_green:
+        #         alignment_green = 1.0 - abs(sensor_data[3] - 0.5) * 2
+        #         forward_speed_reward += (
+        #             speed_norm * forwardness * alignment_green
+        #         ) * 2  # Extra forward reward for finding both red and green.
+        # else:
+        #     distance_score += -5
+
         if found_red:
             individual.red_objects_found += 1
-            distance_score += (rob.get_food_base_distance() * -1) + (
-                rob.get_robot_food_distance() * -1
-            )  # Negative because closer is better
-        else:
-            distance_score += -8  # Penalize if no red object found
 
         if found_green:
             individual.green_objects_found += 1
+            # red_green_score += 1
 
-        lw, rw = individual.get_motor_commands(sensor_data)
-        rob.move_blocking(lw, rw, 300)
+        rob.move(lw, rw, 300)
 
-        base_detects_food = rob.base_detects_food()
-        if base_detects_food:
+        if rob.get_food_base_distance() < 0.1:
             print("Food detected by base!")
+            distance_score += 30  # Reward for detecting food to base
             break
 
     rob.move_blocking(0, 0, 200)
 
     # Compute final fitness: scale alignment to 0-10, subtract penalties
-    individual.fitness = distance_score
+    individual.fitness = distance_score + forward_speed_reward
     individual.survival_time = time.time() - start_time
 
     return individual.fitness
@@ -544,9 +572,13 @@ def run_individual_from_file(
     try:
         individual = load_individual(file_path)
         detector = RedGreenObjectDetector(rob)
-
-        rob.set_phone_pan_blocking(177, 100)
-        rob.set_phone_tilt_blocking(109, 100)
+        if is_hardware:
+            # rob.set_phone_pan_blocking(177, 100)
+            rob.set_phone_pan_blocking(180, 100)
+            rob.set_phone_tilt_blocking(100, 100)
+        else:
+            rob.set_phone_pan_blocking(177, 100)
+            rob.set_phone_tilt_blocking(109, 100)
 
         print(f"Running individual from: {file_path}")
         print("Press Ctrl+C to stop manually.\n")
@@ -576,30 +608,40 @@ def run_individual_from_file(
                 sensor_data, found_red, found_green = detector.get_sensor_data(
                     ir, is_hardware
                 )
+                # print("red: ", found_red, "green:", found_green)
 
                 lw, rw = individual.get_motor_commands(sensor_data)
 
+                if not is_hardware:
+                    distance_to_target = rob.get_food_base_distance()
+                else:
+                    distance_to_target = 0
+
                 print(
-                    f"Moving with L_speed={lw}, R_speed={rw}, found_red={found_red}, found_green={found_green}"
+                    f"Moving with L_speed={lw}, R_speed={rw}, found_red={found_red}, found_green={found_green}, distance_to_target={distance_to_target:.2f}"
                 )
                 rob.move(lw, rw, 300)  # Non-blocking move for continuous evaluation
 
                 # Calculate alignment reward
-                reward = 0.0
-                if found_red and found_green:
-                    rx, gx = sensor_data[0], sensor_data[3]  # red_x, green_x
-                    error = abs(rx - gx)
-                    alignment = max(0.0, 1.0 - error)
-                    reward = alignment
+                # reward = 0.0
+                # if found_red and found_green:
+                #     rx, gx = sensor_data[0], sensor_data[3]  # red_x, green_x
+                #     error = abs(rx - gx)
+                #     alignment = max(0.0, 1.0 - error)
+                #     reward = alignment
 
-                # Log to CSV
-                timestamp = time.time() - start_time
-                row = (
-                    [timestamp] + sensor_data + [lw, rw, reward, found_red, found_green]
-                )
-                writer.writerow(row)
+                # # Log to CSV
+                # timestamp = time.time() - start_time
+                # row = (
+                #     [timestamp] + sensor_data + [lw, rw, reward, found_red, found_green]
+                # )
+                # writer.writerow(row)
 
-        rob.move_blocking(0, 0, 50)
+                # print("robot food distance:", rob.get_robot_food_distance())
+
+                if not is_hardware and rob.get_food_base_distance() < 0.11:
+                    print("Food detected by base!")
+                    break
 
         print("\n--- Evaluation Finished ---")
         print(f"Survival time: {time.time() - start_time:.2f}s")
@@ -617,11 +659,11 @@ def genetic_algorithm(rob: IRobobo, parallel=False, num_processes=10):
     """Full genetic algorithm implementation with (μ,λ) selection - with parallel support"""
     MU = 10
     LAMBDA = 20
-    GENERATIONS = 100
+    GENERATIONS = 300
     CROSSOVER_RATE = 0.7
     MUTATION_RATE = 0.2
     TOURNAMENT_SIZE = 3
-    ELITISM_COUNT = 1
+    ELITISM_COUNT = 3
 
     print(f"Running Genetic Algorithm with (μ,λ) selection")
     print(f"Parents (μ): {MU}, Offspring (λ): {LAMBDA}")
@@ -805,8 +847,8 @@ def genetic_algorithm(rob: IRobobo, parallel=False, num_processes=10):
 
             # Add all offspring to the queue (skip elite individuals)
             for i, individual in enumerate(offspring):
-                if i < ELITISM_COUNT:
-                    continue  # Skip evaluation for elite individuals
+                # if i < ELITISM_COUNT:
+                #     continue  # Skip evaluation for elite individuals
                 data = {
                     "genome": individual.genome,
                     "fitness": individual.fitness,
@@ -837,7 +879,7 @@ def genetic_algorithm(rob: IRobobo, parallel=False, num_processes=10):
 
             # Collect results as they come in
             results_collected = 0
-            offspring_to_evaluate = len(offspring) - ELITISM_COUNT
+            offspring_to_evaluate = len(offspring)  # - ELITISM_COUNT
             while results_collected < offspring_to_evaluate:
                 try:
                     result = result_queue.get(
@@ -875,8 +917,8 @@ def genetic_algorithm(rob: IRobobo, parallel=False, num_processes=10):
             print(f"Generation {generation+1} evaluation complete!")
         else:
             for i, individual in enumerate(offspring):
-                if i < ELITISM_COUNT:
-                    continue
+                # if i < ELITISM_COUNT:
+                #     continue
                 fitness = fitness_evaluation(
                     rob,
                     individual,
