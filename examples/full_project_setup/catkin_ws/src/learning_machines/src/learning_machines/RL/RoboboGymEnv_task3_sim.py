@@ -265,7 +265,7 @@ class RoboboGymEnv(gym.Env):
 
             if not self.prev_obs[16]:
                 self.steps_since_red_captured = 0
-                reward += 20
+                reward += 16
                 self.notes += "Rd cptrd! "
                 self.steps_to_red = (
                     self.steps_to_red * (1 - self.red_alpha)) + (
@@ -297,7 +297,7 @@ class RoboboGymEnv(gym.Env):
             self.steps_since_red_captured += 1
 
             if self.prev_obs[16]:
-                reward -= 10
+                reward -= 20
                 self.notes += "Rd Uncptrd! "
                 self.red_uncaptured += 1
             else:
