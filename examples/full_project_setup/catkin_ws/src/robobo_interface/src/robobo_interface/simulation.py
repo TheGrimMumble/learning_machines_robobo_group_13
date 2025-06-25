@@ -483,6 +483,14 @@ class SimulationRobobo(IRobobo):
         """
         pos = self._sim.getObjectPosition(self._left_wheel, self._sim.handle_world)
         return Position(*pos)
+    
+    def get_BS_position(self) -> Position:
+        """Get the position of the Back Stub (Relative to the world)
+
+        This only works in the simulation.
+        """
+        pos = self._sim.getObjectPosition(self._back_stub, self._sim.handle_world)
+        return Position(*pos)
 
     def get_base_position(self) -> Position:
         """Get the position of the base to deliver food at.
@@ -554,8 +562,9 @@ class SimulationRobobo(IRobobo):
         # fmt: off
         self._robobo = self._get_object(f"/Robobo{self._identifier}")
         self._wheels_script = self._get_childscript(f"/Robobo{self._identifier}/Left_Motor")
-        self._right_wheel = self._get_childscript(f"/Robobo{self._identifier}/Right_Motor/Right_Wheel_Respondable/Right_Wheel_Visual")
-        self._left_wheel = self._get_childscript(f"/Robobo{self._identifier}/Left_Motor/Left_Wheel_Respondable/Left_Wheel_Visual")
+        self._right_wheel = self._get_object(f"/Robobo{self._identifier}/Right_Motor/Right_Wheel_Respondable/Right_Wheel_Visual")
+        self._left_wheel = self._get_object(f"/Robobo{self._identifier}/Left_Motor/Left_Wheel_Respondable/Left_Wheel_Visual")
+        self._back_stub = self._get_object(f"/Robobo{self._identifier}/Force_sensor_slicer/Slicer/Slicer_visual")
         self._leds_script = self._get_childscript(f"/Robobo{self._identifier}/Back_L")
         self._ir_script = self._get_childscript(f"/Robobo{self._identifier}/IR_Back_C")
         self._pan_motor_script = self._get_childscript(f"/Robobo{self._identifier}/Pan_Motor")

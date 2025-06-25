@@ -32,7 +32,7 @@ from robobo_interface import Orientation
 if __name__ == "__main__":
     total_time_steps = 512*4 #  <------------------------
     policy = 'ppo'
-    version = 'task3_v04'
+    version = 'task3_v05'
 
     # You can do better argument parsing than this!
     if len(sys.argv) < 2:
@@ -90,7 +90,13 @@ if __name__ == "__main__":
         #     right_speed = forward + turn
 
         #     rob.move_blocking(left_speed, right_speed, 250)
-        print(f"max left right wheel dist: {abs(rob.get_LW_position() - rob.get_RW_position())}")
+        def compute_relative(pos_from, pos_to):
+            delta = np.array([pos_to.x - pos_from.x, pos_to.y - pos_from.y])
+            distance = np.linalg.norm(delta)
+
+            return distance
+        
+        print(f"max left right wheel dist: {compute_relative(rob.get_RW_position(), rob.get_LW_position())}")
         while not rob.base_detects_food():
             image = rob.read_image_front()
             green_found, green_cx, green_area, red_found, red_cx, red_area, red_captured = env.detect_objects(image)
@@ -140,36 +146,36 @@ if __name__ == "__main__":
         rob.play_simulation()
         time.sleep(0.5)
 
-        # with open(f"/root/results/{policy}_{version}.csv", "w") as f:
-        #     writer = csv.writer(f)
-        #     writer.writerow([
-        #          "Step #",
-        #          "Left Speed",
-        #          "Right Speed",
-        #          "Collision",
-        #          "#Stps to red",
-        #          "#Red found",
-        #          "#Red lost",
-        #          "#Red captured",
-        #          "#Red uncaptured",
-        #          "#Stps to green",
-        #          "#Green found",
-        #          "#Green lost",
-        #          "Mean reward"])
+        with open(f"/root/results/{policy}_{version}.csv", "w") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                 "Step #",
+                 "Left Speed",
+                 "Right Speed",
+                 "Collision",
+                 "#Stps to red",
+                 "#Red found",
+                 "#Red lost",
+                 "#Red captured",
+                 "#Red uncaptured",
+                 "#Stps to green",
+                 "#Green found",
+                 "#Green lost",
+                 "Mean reward"])
 
-        # model, env = train_model(
-        #     rob,
-        #     total_time_steps = total_time_steps,
-        #     policy = policy,
-        #     version = version
-        #     )
+        model, env = train_model(
+            rob,
+            total_time_steps = total_time_steps,
+            policy = policy,
+            version = version
+            )
 
-        resume_model_at = 32768
-        model, env = continue_training(
-                            rob,
-                            f"/root/results/{policy}_{resume_model_at}_{version}"
-                            )
-        env.global_step = resume_model_at
+        resume_model_at = total_time_steps
+        # model, env = continue_training(
+        #                     rob,
+        #                     f"/root/results/{policy}_{resume_model_at}_{version}"
+        #                     )
+        # env.global_step = resume_model_at
         
         for i in range(int(resume_model_at // total_time_steps - 1), 151):
             # Retry until it succeeds

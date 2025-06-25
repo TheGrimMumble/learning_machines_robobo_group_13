@@ -20,7 +20,10 @@ class RoboboGymEnv(gym.Env):
     def __init__(self, rob: IRobobo):
         super().__init__()
         self.robobo = rob
-        self.robobo.set_phone_tilt_blocking(109, 100)
+        self.robobo.stop_simulation()
+        time.sleep(0.5)
+        self.robobo.play_simulation()
+        self.robobo.set_phone_tilt(109, 100)
 
         # Left and right wheel, needs rescaling
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(2,), dtype=np.float32)
@@ -33,8 +36,7 @@ class RoboboGymEnv(gym.Env):
         self.calibrate_irs = np.array([6, 6, 59, 59, 5, 5, 57, 5])
         self.irs_max = np.array([1_000, 1_000, 230, 230, 225, 445, 1_000, 445])
         self.previous_action = np.array([0,0], dtype=np.float32)
-        self.previous_base_distance = None
-        self.previous_food_distance = None
+        self.previous_orientation_distance = {"food": None, "base": None}
 
         # The duration of a step in miliseconds, so each step takes half a second
         self.timestep_duration = 100
@@ -42,7 +44,8 @@ class RoboboGymEnv(gym.Env):
         self.step_in_episode = 0
         self.global_step = 0
 
-        self.steps_to_red = 0
+        self.steps_to_red = None
+        self.red_alpha = 0.05
         self.red_found = 0
         self.red_lost = 0
         self.red_captured = 0
@@ -203,61 +206,38 @@ class RoboboGymEnv(gym.Env):
         return float(reward)
 
 
-    def alignment_improving(self, cx, i):
+    def orientation_distance_reward(self, choice: str):
+        assert choice in ["food", "base"]
         reward = 0
-        buffer = 0.05
-        multiplier = 2
 
-        if cx < -buffer:
-            reward += cx - self.prev_obs[i]
-        elif cx > buffer:
-            reward += self.prev_obs[i] - cx
-        else:
-            reward += 1 / multiplier
-
-        if reward > 0:
-            reward *= 2
-        reward *= multiplier
-        reward = np.clip(reward, -2, 2)
-            
-        if round(reward, 2) != 0.00:
-            self.notes += f"Align: {reward:.2f} "
-        return float(reward)
-
-
-    def target_getting_bigger(self, area, i):
-        reward = (area - self.prev_obs[i]) * 500
-        reward = np.clip(reward, -4, 4)
-        if round(reward, 2) != 0.00:
-            self.notes += f"Apprch: {reward:.2f} "
-        return float(reward)
-    
-
-    def compute_distance(self, choice: str):
-        assert choice in ["food", "base"]
-        pos = self.robobo.get_position()
         if choice == "food":
             info = self.robobo.get_food_position()
         elif choice == "base":
             info = self.robobo.get_base_position()
-        delta = np.array([info.x - pos.x, info.y - pos.y])
-        distance = np.linalg.norm(delta)
-        return distance
-
-
-    def compute_distance_each_wheel(self, choice: str):
-        assert choice in ["food", "base"]
-        pos_both_wheels = [self.robobo.get_LW_position(), self.robobo.get_RW_position()]
-        if choice == "food":
-            info = self.robobo.get_food_position()
-        elif choice == "base":
-            info = self.robobo.get_base_position()
-        dist_from_wheels = []
-        for pos in pos_both_wheels:
+        pos_triangle = [self.robobo.get_position(), self.robobo.get_LW_position(), self.robobo.get_RW_position(), self.robobo.get_BS_position()]
+        
+        dist_from_triangle = []
+        for pos in pos_triangle:
             delta = np.array([info.x - pos.x, info.y - pos.y])
             distance = np.linalg.norm(delta)
-            dist_from_wheels.append(distance)
-        return dist_from_wheels
+            dist_from_triangle.append(distance)
+
+        dist_rob, left, right, stub = dist_from_triangle
+        previous_dist_rob = self.previous_orientation_distance[choice]
+
+        direction = np.clip((left - right) / 0.145, -1, 1) # positive when to the right, negative when to the left
+        left_right_mean = (left + right) / 2
+
+        if stub > left_right_mean:
+            diff = previous_dist_rob - dist_rob if previous_dist_rob else 0
+            if diff > 0.005:
+                reward += diff * 50
+            reward += 1 - abs(direction / 2)
+        else:
+            reward += abs(direction / 2)
+        self.previous_orientation_distance[choice] = dist_rob
+
+        return float(reward)
 
 
     def get_reward(self, obs):
@@ -278,6 +258,7 @@ class RoboboGymEnv(gym.Env):
             self.steps_to_green = self.step_in_episode
             return float(100)
 
+        ori_dist_rwrd = 0
 
         if red_captured:
 
@@ -285,13 +266,14 @@ class RoboboGymEnv(gym.Env):
                 self.steps_since_red_captured = 0
                 reward += 20
                 self.notes += "Rd cptrd! "
-                self.steps_to_red = self.step_in_episode
+                self.steps_to_red = (
+                    self.steps_to_red * (1 - self.red_alpha)) + (
+                    self.step_in_episode * self.red_alpha
+                    ) if self.steps_to_red else self.step_in_episode
                 self.red_captured += 1
             else:
-                base_dist = self.compute_distance("base")
-                distance_reward = self.previous_base_distance - base_dist if self.previous_base_distance else 0
-                self.previous_base_distance = base_dist
-                reward += 1 + distance_reward*50
+                ori_dist_rwrd = self.orientation_distance_reward("base")
+                reward += 1
                 self.notes += "still cptrd! "
                 self.steps_since_red_captured += 1
 
@@ -301,29 +283,26 @@ class RoboboGymEnv(gym.Env):
                     self.notes += "Gr lctd! "
                     self.green_found += 1
                 else:
-                    reward += self.alignment_improving(green_cx, 11)
-                    reward += self.target_getting_bigger(green_area, 12)
+                    ori_dist_rwrd = self.orientation_distance_reward("base")
             else:
                 if self.prev_obs[10]:
                     reward -= 10
                     self.notes += "Gr lost! "
                     self.green_lost += 1
-                else:
-                    reward -= self.punish_proximity(irs)
+            
+            reward -= self.punish_proximity(irs)
 
 
         else:
+            
+            self.steps_since_red_captured += 1
 
             if self.prev_obs[16]:
                 reward -= 10
                 self.notes += "Rd Uncptrd! "
                 self.red_uncaptured += 1
             else:
-                food_dist = self.compute_distance("food")
-                distance_reward = self.previous_food_distance - food_dist if self.previous_food_distance else 0
-                reward += distance_reward*50
-                self.previous_food_distance = food_dist
-            self.steps_since_red_captured += 1
+                ori_dist_rwrd = self.orientation_distance_reward("food")
 
             if red_in_sight:
                 if not self.prev_obs[13]:
@@ -331,15 +310,16 @@ class RoboboGymEnv(gym.Env):
                     self.notes += "Rd lctd! "
                     self.red_found += 1
                 else:
-                    reward += self.alignment_improving(red_cx, 14)
-                    reward += self.target_getting_bigger(red_area, 15)
+                    ori_dist_rwrd = self.orientation_distance_reward("food")
             else:
                 if self.prev_obs[13]:
                     reward -= 10
                     self.notes += "Rd lost! "
                     self.red_lost += 1
-                else:
-                    reward -= self.punish_proximity(irs)
+                
+                reward -= self.punish_proximity(irs)
+        
+        reward += ori_dist_rwrd
 
         # self.notes += f"#: {self.steps_since_red_captured}"
         # reward -= self.steps_since_red_captured * 0.05
@@ -396,9 +376,9 @@ class RoboboGymEnv(gym.Env):
         # Reset simulator, not sure yet whether we should stop and start the simulator
         # for each episode, but it seemed like the savest option to start with
         self.robobo.stop_simulation()
-        # time.sleep(2)
+        time.sleep(0.5)
         self.robobo.play_simulation()
-        self.robobo.set_phone_tilt_blocking(109, 100)
+        self.robobo.set_phone_tilt(109, 100)
 
         self.step_in_episode = 0
 
