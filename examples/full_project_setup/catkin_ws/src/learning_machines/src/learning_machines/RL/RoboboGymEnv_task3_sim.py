@@ -23,6 +23,7 @@ class RoboboGymEnv(gym.Env):
         self.robobo.stop_simulation()
         time.sleep(0.5)
         self.robobo.play_simulation()
+        time.sleep(0.5)
         self.robobo.set_phone_tilt(109, 100)
 
         # Left and right wheel, needs rescaling
@@ -378,6 +379,7 @@ class RoboboGymEnv(gym.Env):
         self.robobo.stop_simulation()
         time.sleep(0.5)
         self.robobo.play_simulation()
+        time.sleep(0.5)
         self.robobo.set_phone_tilt(109, 100)
 
         self.step_in_episode = 0
