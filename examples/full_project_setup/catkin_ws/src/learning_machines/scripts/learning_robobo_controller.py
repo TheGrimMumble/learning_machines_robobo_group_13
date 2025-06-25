@@ -32,7 +32,7 @@ from robobo_interface import Orientation
 if __name__ == "__main__":
     total_time_steps = 512*4 #  <------------------------
     policy = 'ppo'
-    version = 'task3_v03'
+    version = 'task3_v04'
 
     # You can do better argument parsing than this!
     if len(sys.argv) < 2:
@@ -74,21 +74,34 @@ if __name__ == "__main__":
         #     rob.move_blocking(100, 100, 250)
         #     image = rob.read_image_front()
         #     green_found, green_cx, green_area, red_found, red_cx, red_area, red_captured = env.detect_objects(image)
+        # while not rob.base_detects_food():
+        #     (food_dist, food_yaw), (base_dist, base_yaw) = env.get_relative_targets()
+        #     food_pos = rob.get_food_position()
+        #     print(f"food_pos: x-{food_pos.x:.2f}, y-{food_pos.y:.2f}")
+        #     # print(f"food_dist: {food_dist}")
+        #     k_turn = 20  # turning scale
+        #     k_fwd = 20   # forward speed
+
+        #     alignment = np.cos(food_yaw)
+        #     forward = k_fwd * max(0, alignment)
+        #     turn = (food_yaw / np.pi) * k_turn
+
+        #     left_speed = forward - turn
+        #     right_speed = forward + turn
+
+        #     rob.move_blocking(left_speed, right_speed, 250)
+        print(f"max left right wheel dist: {abs(rob.get_LW_position() - rob.get_RW_position())}")
         while not rob.base_detects_food():
-            (food_dist, food_yaw), (base_dist, base_yaw) = env.get_relative_targets()
-            food_pos = rob.get_food_position()
-            print(f"food_pos: x-{food_pos.x:.2f}, y-{food_pos.y:.2f}")
-            # print(f"food_dist: {food_dist}")
+            image = rob.read_image_front()
+            green_found, green_cx, green_area, red_found, red_cx, red_area, red_captured = env.detect_objects(image)
+            left, right = env.compute_distance_each_wheel("food")
+
+            turn = left - right
             k_turn = 20  # turning scale
             k_fwd = 20   # forward speed
 
-            alignment = np.cos(food_yaw)
-            forward = k_fwd * max(0, alignment)
-            turn = (food_yaw / np.pi) * k_turn
-
-            left_speed = forward - turn
-            right_speed = forward + turn
-
+            left_speed = k_fwd + k_turn * turn
+            right_speed = k_fwd + k_turn * turn
 
             rob.move_blocking(left_speed, right_speed, 250)
 
@@ -151,7 +164,7 @@ if __name__ == "__main__":
         #     version = version
         #     )
 
-        resume_model_at = 221184
+        resume_model_at = 32768
         model, env = continue_training(
                             rob,
                             f"/root/results/{policy}_{resume_model_at}_{version}"

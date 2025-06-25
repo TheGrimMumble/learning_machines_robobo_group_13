@@ -33,8 +33,6 @@ class RoboboGymEnv(gym.Env):
         self.calibrate_irs = np.array([6, 6, 59, 59, 5, 5, 57, 5])
         self.irs_max = np.array([1_000, 1_000, 230, 230, 225, 445, 1_000, 445])
         self.previous_action = np.array([0,0], dtype=np.float32)
-        self.previous_base_distance = None
-        self.previous_food_distance = None
 
         # The duration of a step in miliseconds, so each step takes half a second
         self.timestep_duration = 100
@@ -54,8 +52,11 @@ class RoboboGymEnv(gym.Env):
 
         # The max amount of steps the robot can take per episode
         self.max_steps_in_episode = 256*2
+        self.exploration_buffer_size = 4
         self.first_step = True
+        self.exploration_buffer = self.reset_exploration_buffer()
         self.collision_count = 0
+        self.visited_poses = set()
 
         self.vision_size = 256
         self.prev_obs = np.array([0]*18, dtype=np.float32)
@@ -105,6 +106,21 @@ class RoboboGymEnv(gym.Env):
             "| "
             ]
         self.notes = ""
+
+
+    def pose_key(self, pos, ori, precision=0):
+        return (
+            round(pos.x, precision),
+            round(pos.y, precision),
+            round(pos.z, precision),
+            round(ori.yaw, precision+1),
+            round(ori.pitch, precision),
+            round(ori.roll, precision),
+        )
+
+        
+    def reset_exploration_buffer(self):
+        return [np.array([0, 0], dtype=np.float32)] * int(self.exploration_buffer_size)
     
 
     def detect_helper(self, mask):
@@ -196,11 +212,48 @@ class RoboboGymEnv(gym.Env):
         if np.max(irs) > threshold:
             self.notes += "Crash! "
             self.collision_count += 1
+            self.reset_exploration_buffer()
             reward += 5
         elif np.max(irs) > 0.1:
             self.notes += "Close! "
+            index = int(np.round((np.max(irs) + (1 - threshold)) * self.exploration_buffer_size))
+            self.exploration_buffer[:index] = [
+                np.array([0,0], dtype=np.float32) for _ in range(index)
+                ]
             reward += np.max(irs)*5
         return float(reward)
+    
+
+    def exploration_reward_deprecated(self):
+        coordinates = np.sum(self.exploration_buffer, axis=0)
+        y, x = coordinates
+        distance = np.sqrt(y**2 + x**2)
+
+        angle = np.arctan2(y, x)
+        ideal_angle = -np.pi / 4
+        angle_diff = np.abs(np.arctan2(
+            np.sin(angle - ideal_angle),
+            np.cos(angle - ideal_angle)
+            ))
+        direction_score = np.abs(np.cos(angle_diff))
+        reward = (distance * direction_score) / self.exploration_buffer_size
+        reward = float(min(2, reward*0.5))
+        if round(reward, 2) != 0.00:
+            self.notes += f"Explr: {reward:.2f} "
+        return reward
+    
+
+    def exploration_reward(self):
+        pos = self.robobo.get_position()
+        ori = self.robobo.get_orientation()
+        key = self.pose_key(pos, ori)
+
+        if key in self.visited_poses:
+            return -0.5
+
+        self.visited_poses.add(key)
+        self.notes += f"NewPos "
+        return 0.5
 
 
     def alignment_improving(self, cx, i):
@@ -216,21 +269,54 @@ class RoboboGymEnv(gym.Env):
             reward += 1 / multiplier
 
         if reward > 0:
-            reward *= 2
-        reward *= multiplier
-        reward = np.clip(reward, -2, 2)
+            reward = min(2, reward * multiplier)
             
         if round(reward, 2) != 0.00:
             self.notes += f"Align: {reward:.2f} "
-        return float(reward)
-
+        return float(reward*2)
+    
 
     def target_getting_bigger(self, area, i):
-        reward = (area - self.prev_obs[i]) * 500
-        reward = np.clip(reward, -4, 4)
+        reward = area - self.prev_obs[i]
+        reward = float(min(4, reward*500))
         if round(reward, 2) != 0.00:
             self.notes += f"Apprch: {reward:.2f} "
-        return float(reward)
+        return reward
+
+
+    def get_relative_targets(self):
+        def compute_relative(pos_from, pos_to, yaw_from):
+            delta = np.array([pos_to.x - pos_from.x, pos_to.y - pos_from.y])
+            distance = np.linalg.norm(delta)
+
+            # angle_to_target = np.arctan2(delta[1], delta[0])
+            angle_to_target = np.arctan2(delta[1], delta[0]) - (np.pi / 2)
+
+            # Normalize yaw offset to [-π, π]
+            # yaw_offset = yaw_from + angle_to_target
+            # yaw_offset = (yaw_offset + np.pi) % (2 * np.pi) - np.pi
+            # robustly wrap into [-π, π]
+            raw = angle_to_target + yaw_from
+            yaw_offset = np.arctan2(np.sin(raw), np.cos(raw))
+
+            return distance, yaw_offset
+
+        pos = self.robobo.get_position()
+        ori = self.robobo.get_orientation()
+        # Adjust position by offset in robot's forward direction
+        # Assume the offset is 0.05 meters (5cm) forward — tweak as needed
+        # offset_distance = 0.5
+        # pos.x += offset_distance * np.cos(ori.pitch)  # forward along heading
+        # pos.y += offset_distance * np.sin(ori.pitch)
+
+
+        food = self.robobo.get_food_position()
+        base = self.robobo.get_base_position()
+
+        food_info = compute_relative(pos, food, ori.pitch)
+        base_info = compute_relative(pos, base, ori.pitch)
+
+        return food_info, base_info
     
 
     def compute_distance(self, choice: str):
@@ -243,23 +329,9 @@ class RoboboGymEnv(gym.Env):
         delta = np.array([info.x - pos.x, info.y - pos.y])
         distance = np.linalg.norm(delta)
         return distance
+        
 
-
-    def compute_distance_each_wheel(self, choice: str):
-        assert choice in ["food", "base"]
-        pos_both_wheels = [self.robobo.get_LW_position(), self.robobo.get_RW_position()]
-        if choice == "food":
-            info = self.robobo.get_food_position()
-        elif choice == "base":
-            info = self.robobo.get_base_position()
-        dist_from_wheels = []
-        for pos in pos_both_wheels:
-            delta = np.array([info.x - pos.x, info.y - pos.y])
-            distance = np.linalg.norm(delta)
-            dist_from_wheels.append(distance)
-        return dist_from_wheels
-
-
+    
     def get_reward(self, obs):
         reward = 0
         irs = obs[:8]
@@ -283,15 +355,13 @@ class RoboboGymEnv(gym.Env):
 
             if not self.prev_obs[16]:
                 self.steps_since_red_captured = 0
+                self.visited_poses.clear()
                 reward += 20
                 self.notes += "Rd cptrd! "
                 self.steps_to_red = self.step_in_episode
                 self.red_captured += 1
             else:
-                base_dist = self.compute_distance("base")
-                distance_reward = self.previous_base_distance - base_dist if self.previous_base_distance else 0
-                self.previous_base_distance = base_dist
-                reward += 1 + distance_reward*50
+                reward += 1
                 self.notes += "still cptrd! "
                 self.steps_since_red_captured += 1
 
@@ -305,24 +375,24 @@ class RoboboGymEnv(gym.Env):
                     reward += self.target_getting_bigger(green_area, 12)
             else:
                 if self.prev_obs[10]:
+                    self.reset_exploration_buffer()
+                    self.visited_poses.clear()
                     reward -= 10
                     self.notes += "Gr lost! "
                     self.green_lost += 1
                 else:
                     reward -= self.punish_proximity(irs)
+                    reward += self.exploration_reward()
 
 
         else:
 
             if self.prev_obs[16]:
+                self.reset_exploration_buffer()
+                self.visited_poses.clear()
                 reward -= 10
                 self.notes += "Rd Uncptrd! "
                 self.red_uncaptured += 1
-            else:
-                food_dist = self.compute_distance("food")
-                distance_reward = self.previous_food_distance - food_dist if self.previous_food_distance else 0
-                reward += distance_reward*50
-                self.previous_food_distance = food_dist
             self.steps_since_red_captured += 1
 
             if red_in_sight:
@@ -335,11 +405,14 @@ class RoboboGymEnv(gym.Env):
                     reward += self.target_getting_bigger(red_area, 15)
             else:
                 if self.prev_obs[13]:
+                    self.reset_exploration_buffer()
+                    self.visited_poses.clear()
                     reward -= 10
                     self.notes += "Rd lost! "
                     self.red_lost += 1
                 else:
                     reward -= self.punish_proximity(irs)
+                    reward += self.exploration_reward()
 
         # self.notes += f"#: {self.steps_since_red_captured}"
         # reward -= self.steps_since_red_captured * 0.05
@@ -366,6 +439,8 @@ class RoboboGymEnv(gym.Env):
         action = np.array(action, dtype=np.float32)
         self.step_in_episode += 1
         self.global_step += 1
+        self.exploration_buffer.append(np.clip(action, -0.5, 0.5))
+        self.exploration_buffer.pop(0)
         max_speed = 100
         left_speed = action[0] * max_speed
         right_speed = action[1] * max_speed
@@ -399,6 +474,8 @@ class RoboboGymEnv(gym.Env):
         # time.sleep(2)
         self.robobo.play_simulation()
         self.robobo.set_phone_tilt_blocking(109, 100)
+
+        self.visited_poses.clear()
 
         self.step_in_episode = 0
 
