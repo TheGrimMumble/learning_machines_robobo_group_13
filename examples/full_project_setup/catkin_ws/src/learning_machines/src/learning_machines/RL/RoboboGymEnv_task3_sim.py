@@ -35,7 +35,7 @@ class RoboboGymEnv(gym.Env):
             dtype=np.float32)       
         
         self.calibrate_irs = np.array([6, 6, 59, 59, 5, 5, 57, 5])
-        self.irs_max = np.array([1_000, 1_000, 230, 230, 225, 445, 1_000, 445])
+        self.irs_max = np.array([1_000, 1_000, 10_000, 10_000, 10_000, 445, 1_000, 445])
         self.previous_action = np.array([0,0], dtype=np.float32)
         self.previous_orientation_distance = {"food": None, "base": None}
 
@@ -131,7 +131,7 @@ class RoboboGymEnv(gym.Env):
                 center_x = (x + w*0.5) / self.vision_size
                 center_x_alignment = (center_x - 0.5) * 2
                 lowest_y = (y + h) / self.vision_size
-                if center_x_alignment > 0.9 and lowest_y > 0.9:
+                if (-0.05 < center_x_alignment < 0.05) and (lowest_y > 0.9):
                     captured = True
 
         return [in_sight, center_x_alignment, area, captured]
@@ -196,14 +196,14 @@ class RoboboGymEnv(gym.Env):
 
     def punish_proximity(self, irs):
         reward = 0
-        threshold = 0.75
+        threshold = 0.7
         if np.max(irs) > threshold:
             self.notes += "Crash! "
             self.collision_count += 1
             reward += 5
-        elif np.max(irs) > 0.1:
+        elif np.max(irs) > 0.2:
             self.notes += "Close! "
-            reward += np.max(irs)*5
+            reward += np.max(irs)*3
         return float(reward)
 
 
@@ -233,9 +233,9 @@ class RoboboGymEnv(gym.Env):
             diff = previous_dist_rob - dist_rob if previous_dist_rob else 0
             if diff > 0.005:
                 reward += diff * 50
-            reward += 1 - abs(direction / 2)
+            reward -= abs(direction / 2)
         else:
-            reward += abs(direction / 2)
+            reward -= 1 - abs(direction / 2)
         self.previous_orientation_distance[choice] = dist_rob
 
         return float(reward)
@@ -290,8 +290,6 @@ class RoboboGymEnv(gym.Env):
                     reward -= 10
                     self.notes += "Gr lost! "
                     self.green_lost += 1
-            
-            reward -= self.punish_proximity(irs)
 
 
         else:
@@ -318,8 +316,8 @@ class RoboboGymEnv(gym.Env):
                     self.notes += "Rd lost! "
                     self.red_lost += 1
                 
-                reward -= self.punish_proximity(irs)
-        
+                
+        reward -= self.punish_proximity(irs)
         reward += ori_dist_rwrd
 
         # self.notes += f"#: {self.steps_since_red_captured}"
