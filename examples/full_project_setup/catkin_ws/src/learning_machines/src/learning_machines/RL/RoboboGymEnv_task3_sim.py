@@ -131,7 +131,7 @@ class RoboboGymEnv(gym.Env):
                 center_x = (x + w*0.5) / self.vision_size
                 center_x_alignment = (center_x - 0.5) * 2
                 lowest_y = (y + h) / self.vision_size
-                if (-0.05 < center_x_alignment < 0.05) and (lowest_y > 0.9):
+                if (-0.1 < center_x_alignment < 0.1) and (lowest_y > 0.85):
                     captured = True
 
         return [in_sight, center_x_alignment, area, captured]
