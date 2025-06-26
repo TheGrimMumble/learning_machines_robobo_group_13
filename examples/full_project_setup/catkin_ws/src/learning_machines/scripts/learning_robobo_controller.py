@@ -33,7 +33,7 @@ from robobo_interface import Orientation
 if __name__ == "__main__":
     total_time_steps = 512*4 #  <------------------------
     policy = 'ppo'
-    version = 'task3_v07'
+    version = 'task3_v08'
 
     # You can do better argument parsing than this!
     if len(sys.argv) < 2:
@@ -147,7 +147,7 @@ if __name__ == "__main__":
         rob.play_simulation()
         time.sleep(0.5)
 
-        codename = "blacktower"
+        codename = "blacktower_extended"
         with open(f"/root/results/{policy}_{codename}.csv", "w") as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -172,41 +172,42 @@ if __name__ == "__main__":
         #     policy = policy,
         #     version = version
         #     )
-        test_model_till = 145408
-        # resume_model_at = 143360
-        # model, env = continue_training(
-        #                     rob,
-        #                     f"/root/results/{policy}_{resume_model_at}_{version}"
-        #                     )
-        # env.global_step = resume_model_at
+        # test_model_till = 145408
+        resume_model_at = 145408
+        model, env = continue_training(
+                            rob,
+                            f"/root/results/{policy}_{resume_model_at}_{'task3_v07'}"
+                            )
+        env.global_step = resume_model_at
         
-        for i in range(1, int(test_model_till // total_time_steps + 1)):
-            # range(int(resume_model_at // total_time_steps - 1), 301):
+        for i in range(int(resume_model_at // total_time_steps - 1), 501):
+            # range(1, int(test_model_till // total_time_steps + 1)):
+
             # Retry until it succeeds
-            # while True:
-            #     print(f"Starting training at step {total_time_steps * (i + 1)}:")
-            #     try:
-            #         rob.stop_simulation()
-            #         time.sleep(0.1)
-            #         rob.play_simulation()
-            #         time.sleep(0.1)
-            #         rob.set_phone_tilt_blocking(109, 100)
-            #         model.learn(
-            #             total_timesteps=total_time_steps,
-            #             reset_num_timesteps=False
-            #         )
+            while True:
+                print(f"Starting training at step {total_time_steps * (i + 1)}:")
+                try:
+                    rob.stop_simulation()
+                    time.sleep(0.1)
+                    rob.play_simulation()
+                    time.sleep(0.1)
+                    rob.set_phone_tilt_blocking(109, 100)
+                    model.learn(
+                        total_timesteps=total_time_steps,
+                        reset_num_timesteps=False
+                    )
 
-            #         model.save(f"/root/results/{policy}_{total_time_steps*(i+2)}_{version}")
+                    model.save(f"/root/results/{policy}_{total_time_steps*(i+2)}_{version}")
 
-            #         print("Training paused")
-            #         break 
-            #     except Exception as e:
-            #         print(f"continue_training failed at iteration {i+1}: {e}, retrying...")
-            #         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            #         with open("/root/results/error_log_training.txt", "a") as f:
-            #             f.write(f"[{timestamp}]\n")
-            #             traceback.print_exc(file=f)
-            #             f.write(f"\n\n\n")
+                    print("Training paused")
+                    break 
+                except Exception as e:
+                    print(f"continue_training failed at iteration {i+1}: {e}, retrying...")
+                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    with open("/root/results/error_log_training.txt", "a") as f:
+                        f.write(f"[{timestamp}]\n")
+                        traceback.print_exc(file=f)
+                        f.write(f"\n\n\n")
             # for _ in range(3):
             #     while True:
             #         print(f"Starting inference at step {total_time_steps * (i + 2)}:")
@@ -229,13 +230,13 @@ if __name__ == "__main__":
             #                 f.write(f"\n\n\n")
             for _ in range(5):
                 while True:
-                    print(f"Starting testing at step {total_time_steps * i}:")
+                    print(f"Starting testing at step {total_time_steps * (i + 2)}:")
                     try:
                         testing(
                             rob,
                             policy,
-                            total_time_steps * i,
-                            i,
+                            total_time_steps * (i + 2),
+                            (i + 2),
                             version,
                             codename
                         )
