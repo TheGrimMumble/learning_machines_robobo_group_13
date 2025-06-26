@@ -13,6 +13,10 @@ from learning_machines import continue_training
 from learning_machines import run_test
 from learning_machines import train_model_task2
 from learning_machines import continue_training_task2
+from learning_machines import train_model_callback_task2
+from learning_machines import train_model_task3
+from learning_machines import test_model_task3
+from learning_machines import run_test_task3
 # from learning_machines.test_model import test_model
 # from learning_machines.test_model import evaluate_robot
 
@@ -32,12 +36,16 @@ if __name__ == "__main__":
         raise ValueError(f"{sys.argv[1]} is not a valid argument.")
 
     # run_test_task0_actions(rob)
-    continue_training_task2(rob)
+    # continue_training_task2(rob)
+    # train_model_callback_task2(rob)
     # train_model(rob)
-    # train_model_callback(rob)
+    # # train_model_callback(rob)
     # test_model_hardware(rob)
     # run_test(rob)
     # train_model_task2(rob)
-    # test_model(rob)
+    test_model(rob)
+    # train_model_task3(rob)
+    # run_test_task3(rob)
+    # test_model_task3(rob)
     # evaluate_robot(rob)
     # run_all_actions(rob)

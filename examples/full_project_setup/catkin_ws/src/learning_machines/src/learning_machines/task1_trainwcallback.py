@@ -61,7 +61,7 @@ class RobotEvalCallback(BaseCallback):
             avg_collisions = np.mean(collision_counts)
             avg_reward = np.mean(rewards)
             avg_sensor = np.mean(sensor_values)
-            collision_rate = avg_collisions / 
+            collision_rate = avg_collisions 
             
 
             self.evaluations.append({

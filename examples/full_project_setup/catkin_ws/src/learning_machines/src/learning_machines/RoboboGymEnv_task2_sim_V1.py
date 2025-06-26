@@ -5,6 +5,7 @@ import time
 import cv2
 import datetime
 import csv
+import os
 
 from data_files import FIGURES_DIR
 from robobo_interface import (
@@ -96,7 +97,7 @@ class RoboboGymEnv(gym.Env):
         self.current_action = np.array([0,0])
 
         # The max amount of steps the robot can take per episode
-        self.max_steps_in_episode = 1200 
+        self.max_steps_in_episode = 600 
 
         self.weight_dict = {'pos_diff_weight': 20,
                             'IR_cost_weight': 1.5,
@@ -120,10 +121,14 @@ class RoboboGymEnv(gym.Env):
     def detect_green_object(self, frame):
         # Convert image to HSV color space
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        image_front = self.robobo.read_image_front()
+        # image_front = self.robobo.read_image_front()
 
-        # Define green color range (tweak if needed)
-        lower_green = np.array([50, 100, 100])
+        # # Define green color range (tweak if needed)
+        # lower_green = np.array([50, 100, 100])
+        # lower_green = np.array([50, 100, 100])
+        # upper_green = np.array([80, 255, 255])
+    
+        lower_green = np.array([40, 50, 50])
         upper_green = np.array([80, 255, 255])
 
         # Create binary mask where green is white
@@ -157,6 +162,16 @@ class RoboboGymEnv(gym.Env):
                 # Draw detection on the frame
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
                 cv2.circle(frame, (center_x, center_y), 5, (0, 0, 255), -1)
+        
+        #         # === Debug frame saving ===
+        # if os.environ.get("DEBUG_GREEN_DETECTION") == "1":
+        #     output_dir = "/root/results/debug_frames"
+        #     os.makedirs(output_dir, exist_ok=True)
+        #     frame_id = getattr(self, "debug_frame_id", 0)
+        #     filepath = f"{output_dir}/frame_{frame_id:04d}.png"
+        #     cv2.imwrite(filepath, frame)
+        #     self.debug_frame_id = frame_id + 1
+
 
         return frame, green_found, center_x, center_y, area
 
@@ -290,17 +305,16 @@ class RoboboGymEnv(gym.Env):
         self.forward_speed_reward_ = self.forward_speed_reward()
         
         if green_found == 1:
+            # reward += 0.2
             reward += self.forward_speed_reward_ * self.weight_dict['forward_speed_weight']
             reward += alignment_reward * self.weight_dict['alignment_weight']
         # else:
-        #     if (left_speed > 0 and right_speed > 0):  # Both forward
-        #         turning = abs(left_speed - right_speed)
-        #         speed = (abs(left_speed) + abs(right_speed)) / 2
-
-        #         if turning > 0.3 and speed < 0.5:
-        #             reward += 0.05  # reward slow turning
-        #         elif speed > 0.5:
-        #             reward -= 0.05  # discourage high-speed wandering
+        #     turning = abs(left_speed - right_speed)
+        #     if turning > 0.3:
+        #         reward += 0.5
+            # turning = abs(left_speed - right_speed)
+            # if turning > 0.2:
+            #     reward += 0.1
 
         reward += area * self.weight_dict['area_weight']
         reward += (self.nr_collected_food - self.prev_nr_collected_food) * self.weight_dict['food_weight']
@@ -310,7 +324,9 @@ class RoboboGymEnv(gym.Env):
 
 
     def terminate(self):
-        if self.step_in_episode == self.max_steps_in_episode:
+        if self.nr_collected_food == 7:
+            return True
+        elif self.step_in_episode == self.max_steps_in_episode:
             return True
         else:
             return False
@@ -318,6 +334,8 @@ class RoboboGymEnv(gym.Env):
     def step(self, action):
         # Rescale from [-1, 1] to actual motor speeds, e.g. [-100, 100]
         action = np.array(action, dtype=np.float32)
+        # action = np.asarray(action, dtype=np.float32)
+        # action = np.random.uniform(low=-1.0, high=1.0, size=2).astype(np.float32)
         
         self.step_in_episode += 1
         self.universal_step += 1
@@ -326,12 +344,19 @@ class RoboboGymEnv(gym.Env):
 
         self.current_action = action
 
+
         max_speed = 100
-        left_speed = action[0] * max_speed 
-        right_speed = action[1] * max_speed
+        left_speed = np.round(action[0] * max_speed, decimals=2)
+        
+        right_speed = np.round(action[1] * max_speed, decimals=2)
+
+        # print(f'left speed {left_speed}')
+        # print(f'right speed {right_speed}')
 
         # Send to simulator or hardware
-        self.robobo.move_blocking(left_speed, right_speed, self.timestep_duration)
+        # self.robobo.move_blocking(left_speed, right_speed, self.timestep_duration)
+        self.robobo.move(left_speed, right_speed, self.timestep_duration)
+        # self.robobo.move_blocking(-25, 24, self.timestep_duration)
 
         self.current_position = self.robobo.get_position()
 
@@ -391,6 +416,11 @@ class RoboboGymEnv(gym.Env):
         self.nr_collected_food = 0
         self.prev_nr_collected_food = 0
 
+        self.robobo.set_phone_tilt(100,100)
+        self.robobo.set_phone_pan(180,100)
+        # self.robobo.set_phone_pan(150,100)
+        #     self, tilt_position: int, tilt_speed: int, blockid: Optional[int] = None
+        # ) -> int:
 
 
         # self.proximity_penalty = 0

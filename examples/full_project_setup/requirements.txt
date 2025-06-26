@@ -7,5 +7,6 @@ opencv-python~=4.8
 
 gymnasium~=0.29
 stable-baselines3~=2.2
+# tensorboard>=2.0.0
 
 matplotlib~=3.7

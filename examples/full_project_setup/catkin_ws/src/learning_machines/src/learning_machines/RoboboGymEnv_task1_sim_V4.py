@@ -211,9 +211,9 @@ class RoboboGymEnv(gym.Env):
         done = self.terminate()
         info = self.get_info(observation, reward)
         
-        # for key, value in info.items():
-        #     print(f"{key}: {value}")
-        #     print('')
+        for key, value in info.items():
+            print(f"{key}: {value}")
+            print('')
 
 
         # save info
