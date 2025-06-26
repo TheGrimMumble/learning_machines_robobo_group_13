@@ -200,28 +200,37 @@ class RoboboGymEnv(gym.Env):
         if np.max(irs) > threshold:
             self.notes += "Crash! "
             self.collision_count += 1
-            reward += 5
+            reward += 7
         elif np.max(irs) > 0.2:
             self.notes += "Close! "
-            reward += np.max(irs)*3
+            reward += np.max(irs)*6
         return float(reward)
 
 
     def orientation_distance_reward(self, choice: str):
         assert choice in ["food", "base"]
         reward = 0
+        food_pos = self.robobo.get_food_position()
+        base_pos = self.robobo.get_base_position()
 
         if choice == "food":
-            info = self.robobo.get_food_position()
+            target = food_pos
         elif choice == "base":
-            info = self.robobo.get_base_position()
+            target = base_pos
+
         pos_triangle = [self.robobo.get_position(), self.robobo.get_LW_position(), self.robobo.get_RW_position(), self.robobo.get_BS_position()]
+        dist_pnshmnt_lst = [self.robobo.get_position(), base_pos]
         
-        dist_from_triangle = []
-        for pos in pos_triangle:
-            delta = np.array([info.x - pos.x, info.y - pos.y])
-            distance = np.linalg.norm(delta)
-            dist_from_triangle.append(distance)
+        def get_dist(trgt, lst):
+            distances = []
+            for pos in lst:
+                delta = np.array([trgt.x - pos.x, trgt.y - pos.y])
+                distance = np.linalg.norm(delta)
+                distances.append(distance)
+            return distances
+        
+        dist_from_triangle = get_dist(target, pos_triangle)
+        dist_pnshmnt = get_dist(food_pos, dist_pnshmnt_lst)
 
         dist_rob, left, right, stub = dist_from_triangle
         previous_dist_rob = self.previous_orientation_distance[choice]
@@ -232,10 +241,11 @@ class RoboboGymEnv(gym.Env):
         if stub > left_right_mean:
             diff = previous_dist_rob - dist_rob if previous_dist_rob else 0
             if diff > 0.005:
-                reward += diff * 50
-            reward -= abs(direction / 2)
+                reward += diff * 100
+            reward -= abs(direction)
         else:
-            reward -= 1 - abs(direction / 2)
+            reward -= (1 - abs(direction / 2)) * 2
+        reward -= sum(dist_pnshmnt) * 2
         self.previous_orientation_distance[choice] = dist_rob
 
         return float(reward)
@@ -259,9 +269,9 @@ class RoboboGymEnv(gym.Env):
             self.steps_to_green = self.step_in_episode
             return float(100)
 
-        ori_dist_rwrd = 0
 
         if red_captured:
+            reward += self.orientation_distance_reward("base")
 
             if not self.prev_obs[16]:
                 self.steps_since_red_captured = 0
@@ -272,8 +282,8 @@ class RoboboGymEnv(gym.Env):
                     self.step_in_episode * self.red_alpha
                     ) if self.steps_to_red else self.step_in_episode
                 self.red_captured += 1
+
             else:
-                ori_dist_rwrd = self.orientation_distance_reward("base")
                 reward += 1
                 self.notes += "still cptrd! "
                 self.steps_since_red_captured += 1
@@ -283,8 +293,7 @@ class RoboboGymEnv(gym.Env):
                     reward += 8
                     self.notes += "Gr lctd! "
                     self.green_found += 1
-                else:
-                    ori_dist_rwrd = self.orientation_distance_reward("base")
+
             else:
                 if self.prev_obs[10]:
                     reward -= 10
@@ -293,23 +302,20 @@ class RoboboGymEnv(gym.Env):
 
 
         else:
-            
+            reward += self.orientation_distance_reward("food")
             self.steps_since_red_captured += 1
 
             if self.prev_obs[16]:
                 reward -= 20
                 self.notes += "Rd Uncptrd! "
                 self.red_uncaptured += 1
-            else:
-                ori_dist_rwrd = self.orientation_distance_reward("food")
 
             if red_in_sight:
                 if not self.prev_obs[13]:
                     reward += 8
                     self.notes += "Rd lctd! "
                     self.red_found += 1
-                else:
-                    ori_dist_rwrd = self.orientation_distance_reward("food")
+
             else:
                 if self.prev_obs[13]:
                     reward -= 10
@@ -318,11 +324,7 @@ class RoboboGymEnv(gym.Env):
                 
                 
         reward -= self.punish_proximity(irs)
-        reward += ori_dist_rwrd
 
-        # self.notes += f"#: {self.steps_since_red_captured}"
-        # reward -= self.steps_since_red_captured * 0.05
-        # reward -= steps
         return float(reward)
     
 
