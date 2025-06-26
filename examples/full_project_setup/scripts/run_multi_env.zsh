@@ -8,7 +8,7 @@ SCENE="./scenes/arena_push_easy_4.ttt"
 SCRIPT="./scripts/start_coppelia_sim.zsh"
 
 # Number of instances to run
-NUM_INSTANCES=30
+NUM_INSTANCES=1
 
 # Base port number
 BASE_PORT=20000

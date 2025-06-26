@@ -378,19 +378,40 @@ class Individual:
         return new
 
 
-# Just focused on lining up the red object and green area
+# --------------------------------------------------------------------------- #
+#  FINITE-STATE  “GRAB–AND–DELIVER”  FITNESS  +  STRAIGHT-LINE SPEED BONUS
+# --------------------------------------------------------------------------- #
 def fitness_evaluation(
     rob: IRobobo,
     individual: Individual,
     detector: RedGreenObjectDetector,
     initial_pos,
     initial_orient,
-    max_time=30.0,
-    is_parallel_worker=False,
-):
+    max_time: float = 30.0,
+    is_parallel_worker: bool = False,
+) -> float:
     """
-    Simplified fitness: rewards lining up red with green horizontally, and penalizes collisions.
+    Three-phase fitness + alignment + speed.
+
+    Rewards per control step
+    ----------------------------------------------
+    SEARCH   :  +40⋅Δd_RF  + A₁  + 8⋅straight_speed
+    CARRY    :  +60⋅Δd_FB  + A₂  + 8⋅straight_speed
+    DONE     :                    – 0.05
+    One-shot :  +40 on pickup, +100 on delivery
+    ----------------------------------------------
     """
+    # ------------ constants ------------------------------------------------ #
+    SCALE_RF = 40.0
+    SCALE_FB = 60.0
+    ALIGN_GAIN = 5.0
+    ALIGN_THRESH = 0.25
+    SPEED_GAIN = 8.0
+    PICKUP_BONUS = 40.0
+    DELIVERY_BONUS = 100.0
+    TIME_PENALTY = 0.05  # per loop
+
+    # ------------ reset simulation ---------------------------------------- #
     if isinstance(rob, SimulationRobobo):
         rob.stop_simulation()
         time.sleep(0.5)
@@ -402,77 +423,89 @@ def fitness_evaluation(
     detector.current_pan = 177
     detector.current_tilt = 109
 
+    # ------------ bookkeeping --------------------------------------------- #
+    fitness = 0.0
     start_time = time.time()
+    prev_food_dist = rob.get_robot_food_distance()
+    prev_base_dist = rob.get_food_base_distance()
 
-    # collision_penalty = 0.0
-    # collision_count = 0
-    distance_score = 0
-    forward_speed_reward = 0
-    prev_food_robot_distance = None
-    prev_food_base_distance = None
+    has_food = False
+    delivered = False
 
+    # ===================================================================== #
     while time.time() - start_time < max_time:
+        # -------- perception --------------------------------------------- #
         ir = rob.read_irs()
-        # if any(r is not None and r > 300 for r in ir[:8]):
-        #     collision_count += 1
-        #     if collision_count >= 3:
-        #         # collision_penalty += 1.0
-        #         # collision_count = 0
-        # else:
-        #     collision_count = 0
-        # detect stuck in wall by distance towards wall
-
         sensor_data, found_red, found_green = detector.get_sensor_data(ir)
+        red_x, green_x = sensor_data[0], sensor_data[3]
 
+        # -------- control ------------------------------------------------- #
         lw, rw = individual.get_motor_commands(sensor_data)
-
-        # if found red
-        #   if (distance > 0.16):
-        #       reward for going forward
-        #   else: (it has the object)
-        #       got object reward (+1)
-        #       if found green:
-        #           reward for going forward and decreasing distance
-        food_robot_distance = rob.get_robot_food_distance()
-        food_base_distance = rob.get_food_base_distance()
-        robot_has_food = food_robot_distance < 0.17
-        red_green_score = 0
-        # if found_red:
-        #     distance_score += food_robot_distance * -1 + food_base_distance * -1
-        #     speed_norm = max(0.0, (lw + rw) / 200.0)
-        #     turn_penalty = abs(lw - rw) / 200.0
-        #     forwardness = 1.0 - turn_penalty
-        #     alignment_red = 1.0 - abs(sensor_data[0] - 0.5) * 2
-        #     forward_speed_reward += speed_norm * forwardness * alignment_red
-        #     if robot_has_food and found_green:
-        #         alignment_green = 1.0 - abs(sensor_data[3] - 0.5) * 2
-        #         forward_speed_reward += (
-        #             speed_norm * forwardness * alignment_green
-        #         ) * 2  # Extra forward reward for finding both red and green.
-        # else:
-        #     distance_score += -5
-
-        if found_red:
-            individual.red_objects_found += 1
-
-        if found_green:
-            individual.green_objects_found += 1
-            # red_green_score += 1
-
         rob.move(lw, rw, 300)
 
-        if rob.get_food_base_distance() < 0.1:
-            print("Food detected by base!")
-            distance_score += 30  # Reward for detecting food to base
+        # Straight-line speed (0-1) — only forward motion counts
+        forward_avg = max(0.0, (lw + rw) / 200.0)  # –––> forward %
+        turn_penalty = abs(lw - rw) / 200.0
+        straight_speed = max(0.0, forward_avg - turn_penalty)
+
+        # -------- distances ---------------------------------------------- #
+        food_dist = rob.get_robot_food_distance()
+        base_dist = rob.get_food_base_distance()
+        robot_has_food = food_dist < 0.17
+        food_in_base = base_dist < 0.10
+
+        # -------- SEARCH PHASE ------------------------------------------- #
+        if not has_food:
+            # fitness += (prev_food_dist - food_dist) * SCALE_RF
+
+            if found_red:
+                speed_norm = max(0.0, (lw + rw) / 200.0)
+                turn_penalty = abs(lw - rw) / 200.0
+                forwardness = 1.0 - turn_penalty
+                alignment_red = 1.0 - abs(sensor_data[0] - 0.5) * 2
+                fitness += speed_norm * forwardness * alignment_red
+
+            if robot_has_food:
+                has_food = True
+                fitness += PICKUP_BONUS
+
+        # -------- CARRY PHASE -------------------------------------------- #
+        elif not delivered:
+            # fitness += (prev_base_dist - base_dist) * SCALE_FB
+
+            if found_green and abs(green_x) < ALIGN_THRESH and forward_avg > 0:
+                speed_norm = max(0.0, (lw + rw) / 200.0)
+                turn_penalty = abs(lw - rw) / 200.0
+                forwardness = 1.0 - turn_penalty
+                alignment_red = 1.0 - abs(sensor_data[0] - 0.5) * 2
+                fitness += speed_norm * forwardness * alignment_red
+
+            if food_in_base:
+                delivered = True
+                fitness += DELIVERY_BONUS
+
+        # # -------- DONE PHASE --------------------------------------------- #
+        # else:
+        #     fitness -= TIME_PENALTY  # idle cost
+
+        # -------- universal per-step cost ------------------------------- #
+        fitness -= TIME_PENALTY
+
+        # -------- misc bookkeeping -------------------------------------- #
+        individual.red_objects_found += int(found_red)
+        individual.green_objects_found += int(found_green)
+
+        prev_food_dist = food_dist
+        prev_base_dist = base_dist
+
+        if delivered:
             break
 
+    # ------------ wrap-up -------------------------------------------------- #
     rob.move_blocking(0, 0, 200)
-
-    # Compute final fitness: scale alignment to 0-10, subtract penalties
-    individual.fitness = distance_score + forward_speed_reward
+    individual.fitness = fitness
     individual.survival_time = time.time() - start_time
-
-    return individual.fitness
+    return fitness
 
 
 def evaluate_individual_worker_continuous(
