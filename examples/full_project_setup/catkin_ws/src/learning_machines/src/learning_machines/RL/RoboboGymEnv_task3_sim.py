@@ -125,7 +125,7 @@ class RoboboGymEnv(gym.Env):
             largest = max(contours, key=cv2.contourArea)
             raw_area = cv2.contourArea(largest)
             area = raw_area / (self.vision_size**2)
-            if raw_area > (self.vision_size**2 * 0.001):
+            if raw_area > (self.vision_size**2 * 0.0001):
                 in_sight = True
                 x, y, w, h = cv2.boundingRect(largest)
                 center_x = (x + w*0.5) / self.vision_size
