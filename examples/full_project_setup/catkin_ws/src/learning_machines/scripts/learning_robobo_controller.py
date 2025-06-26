@@ -14,6 +14,7 @@ from learning_machines.RL.RoboboGymEnv_task3_sim import RoboboGymEnv
 from learning_machines.RL.task3 import (
     train_model,
     inference,
+    testing,
     continue_training,
     calibrate_camera,
     print_irs
@@ -32,7 +33,7 @@ from robobo_interface import Orientation
 if __name__ == "__main__":
     total_time_steps = 512*4 #  <------------------------
     policy = 'ppo'
-    version = 'task3_v05'
+    version = 'task3_v07'
 
     # You can do better argument parsing than this!
     if len(sys.argv) < 2:
@@ -146,9 +147,11 @@ if __name__ == "__main__":
         rob.play_simulation()
         time.sleep(0.5)
 
-        with open(f"/root/results/{policy}_{version}.csv", "w") as f:
+        codename = "blacktower"
+        with open(f"/root/results/{policy}_{codename}.csv", "w") as f:
             writer = csv.writer(f)
             writer.writerow([
+                 "i",
                  "Step #",
                  "Left Speed",
                  "Right Speed",
@@ -163,61 +166,83 @@ if __name__ == "__main__":
                  "#Green lost",
                  "Mean reward"])
 
-        model, env = train_model(
-            rob,
-            total_time_steps = total_time_steps,
-            policy = policy,
-            version = version
-            )
-
-        resume_model_at = total_time_steps
+        # model, env = train_model(
+        #     rob,
+        #     total_time_steps = total_time_steps,
+        #     policy = policy,
+        #     version = version
+        #     )
+        test_model_till = 145408
+        # resume_model_at = 143360
         # model, env = continue_training(
         #                     rob,
         #                     f"/root/results/{policy}_{resume_model_at}_{version}"
         #                     )
         # env.global_step = resume_model_at
         
-        for i in range(int(resume_model_at // total_time_steps - 1), 151):
+        for i in range(1, int(test_model_till // total_time_steps + 1)):
+            # range(int(resume_model_at // total_time_steps - 1), 301):
             # Retry until it succeeds
-            while True:
-                print(f"Starting training at step {total_time_steps * (i + 1)}:")
-                try:
-                    rob.stop_simulation()
-                    time.sleep(0.1)
-                    rob.play_simulation()
-                    time.sleep(0.1)
-                    rob.set_phone_tilt_blocking(109, 100)
-                    model.learn(
-                        total_timesteps=total_time_steps,
-                        reset_num_timesteps=False
-                    )
+            # while True:
+            #     print(f"Starting training at step {total_time_steps * (i + 1)}:")
+            #     try:
+            #         rob.stop_simulation()
+            #         time.sleep(0.1)
+            #         rob.play_simulation()
+            #         time.sleep(0.1)
+            #         rob.set_phone_tilt_blocking(109, 100)
+            #         model.learn(
+            #             total_timesteps=total_time_steps,
+            #             reset_num_timesteps=False
+            #         )
 
-                    model.save(f"/root/results/{policy}_{total_time_steps*(i+2)}_{version}")
+            #         model.save(f"/root/results/{policy}_{total_time_steps*(i+2)}_{version}")
 
-                    print("Training paused")
-                    break 
-                except Exception as e:
-                    print(f"continue_training failed at iteration {i+1}: {e}, retrying...")
-                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    with open("/root/results/error_log_training.txt", "a") as f:
-                        f.write(f"[{timestamp}]\n")
-                        traceback.print_exc(file=f)
-                        f.write(f"\n\n\n")
-            for _ in range(3):
+            #         print("Training paused")
+            #         break 
+            #     except Exception as e:
+            #         print(f"continue_training failed at iteration {i+1}: {e}, retrying...")
+            #         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            #         with open("/root/results/error_log_training.txt", "a") as f:
+            #             f.write(f"[{timestamp}]\n")
+            #             traceback.print_exc(file=f)
+            #             f.write(f"\n\n\n")
+            # for _ in range(3):
+            #     while True:
+            #         print(f"Starting inference at step {total_time_steps * (i + 2)}:")
+            #         try:
+            #             rob.set_phone_tilt_blocking(109, 100)
+            #             inference(
+            #                 rob,
+            #                 policy,
+            #                 total_time_steps * (i + 2),
+            #                 version
+            #             )
+            #             print("Inference successful")
+            #             break  
+            #         except Exception as e:
+            #             print(f"inference failed at iteration {i+1}: {e}, retrying...")
+            #             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            #             with open("/root/results/error_log_inference.txt", "a") as f:
+            #                 f.write(f"[{timestamp}]\n")
+            #                 traceback.print_exc(file=f)
+            #                 f.write(f"\n\n\n")
+            for _ in range(5):
                 while True:
-                    print(f"Starting inference at step {total_time_steps * (i + 2)}:")
+                    print(f"Starting testing at step {total_time_steps * i}:")
                     try:
-                        rob.set_phone_tilt_blocking(109, 100)
-                        inference(
+                        testing(
                             rob,
                             policy,
-                            total_time_steps * (i + 2),
-                            version
+                            total_time_steps * i,
+                            i,
+                            version,
+                            codename
                         )
-                        print("Inference successful")
+                        print("Testing successful")
                         break  
                     except Exception as e:
-                        print(f"inference failed at iteration {i+1}: {e}, retrying...")
+                        print(f"testing failed at iteration {i+1}: {e}, retrying...")
                         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         with open("/root/results/error_log_inference.txt", "a") as f:
                             f.write(f"[{timestamp}]\n")

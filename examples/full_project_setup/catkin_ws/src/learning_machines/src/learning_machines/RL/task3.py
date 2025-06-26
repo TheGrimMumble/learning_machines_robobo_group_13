@@ -160,6 +160,71 @@ def inference(
                             mean_reward])
             
 
+def testing(
+        rob:SimulationRobobo,
+        policy,
+        training_steps,
+        i,
+        version,
+        csv_name,
+        print_to_csv=True
+        ):
+
+    path = f"/root/results/{policy}_{training_steps}_{version}"
+    env = RoboboGymEnv(rob)
+
+    n_steps = 256 #  <-------------  validation trajectory length
+
+    env.max_steps_in_episode = n_steps
+    model = PPO.load(path, env=env)
+
+    obs, _ = env.reset()
+    done = False
+    left_speeds = []
+    right_speeds = []
+    rewards = []
+    n_steps_ep = 0
+
+    while not done:
+        n_steps_ep += 1
+        action, _ = model.predict(obs, deterministic=True)
+        # print("action:", action, "shape:", getattr(action, "shape", None))
+
+        max_speed = 100
+        left_speed = action[0] * max_speed
+        right_speed = action[1] * max_speed
+        left_speeds.append(left_speed)
+        right_speeds.append(right_speed)
+
+        obs, reward, done, _bool, info = env.step(action)
+
+        rewards.append(reward)
+
+    left_mean_speed = sum(left_speeds) / n_steps_ep
+    right_mean_speed = sum(right_speeds) / n_steps_ep
+    mean_reward = sum(rewards) / n_steps_ep
+    
+    if print_to_csv:
+        with open(f"/root/results/{policy}_{csv_name}.csv", "a") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                            i,
+                            training_steps,
+                            left_mean_speed,
+                            right_mean_speed,
+                            env.collision_count,
+                            env.steps_to_red,
+                            env.red_found,
+                            env.red_lost,
+                            env.red_captured,
+                            env.red_uncaptured,
+                            env.steps_to_green,
+                            env.green_found,
+                            env.green_lost,
+                            mean_reward
+                            ])
+            
+
 def calibrate_camera(robobo,
                      vision_size,
                      kernel,
