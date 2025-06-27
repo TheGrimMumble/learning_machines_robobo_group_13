@@ -378,9 +378,219 @@ class Individual:
         return new
 
 
-# --------------------------------------------------------------------------- #
-#  FINITE-STATE  “GRAB–AND–DELIVER”  FITNESS  +  STRAIGHT-LINE SPEED BONUS
-# --------------------------------------------------------------------------- #
+import numpy as np
+import time
+
+
+class RewardTracker:
+    """Tracks state variables needed for the new reward function"""
+
+    def __init__(self):
+        self.previous_orientation_distance = {"food": None, "base": None}
+        self.prev_obs = None
+        self.collision_count = 0
+        self.red_captured = 0
+        self.green_found = 0
+        self.green_lost = 0
+        self.red_found = 0
+        self.red_lost = 0
+        self.red_uncaptured = 0
+        self.steps_to_red = None
+        self.steps_to_green = None
+        self.red_alpha = 0.1  # Learning rate for steps_to_red calculation
+        self.step_in_episode = 0
+        self.terminal_state = False
+        self.steps_since_red_captured = 0
+        self.notes = ""
+
+    def punish_proximity(self, irs):
+        reward = 0
+        threshold = 0.7
+        if np.max(irs) > threshold:
+            self.notes += "Crash! "
+            self.collision_count += 1
+            reward += 7
+        elif np.max(irs) > 0.2:
+            self.notes += "Close! "
+            reward += np.max(irs) * 6
+        return float(reward)
+
+    def orientation_distance_reward(self, choice: str, robobo):
+        assert choice in ["food", "base"]
+        reward = 0
+        food_pos = robobo.get_food_position()
+        base_pos = robobo.get_base_position()
+
+        if choice == "food":
+            target = food_pos
+        elif choice == "base":
+            target = base_pos
+
+        pos_triangle = [
+            robobo.get_position(),
+            robobo.get_LW_position(),
+            robobo.get_RW_position(),
+            robobo.get_BS_position(),
+        ]
+        dist_pnshmnt_lst = [robobo.get_position(), base_pos]
+
+        def get_dist(trgt, lst):
+            distances = []
+            for pos in lst:
+                delta = np.array([trgt.x - pos.x, trgt.y - pos.y])
+                distance = np.linalg.norm(delta)
+                distances.append(distance)
+            return distances
+
+        dist_from_triangle = get_dist(target, pos_triangle)
+        dist_pnshmnt = get_dist(food_pos, dist_pnshmnt_lst)
+
+        dist_rob, left, right, stub = dist_from_triangle
+        previous_dist_rob = self.previous_orientation_distance[choice]
+
+        direction = np.clip(
+            (left - right) / 0.145, -1, 1
+        )  # positive when to the right, negative when to the left
+        left_right_mean = (left + right) / 2
+
+        if stub > left_right_mean:
+            diff = previous_dist_rob - dist_rob if previous_dist_rob else 0
+            if diff > 0.005:
+                reward += diff * 100
+            reward -= abs(direction)
+        else:
+            reward -= (1 - abs(direction / 2)) * 2
+        reward -= sum(dist_pnshmnt) * 2
+        self.previous_orientation_distance[choice] = dist_rob
+
+        return float(reward)
+
+    def get_reward(self, obs, robobo):
+        reward = 0
+        irs = obs[:8]
+        wheels = obs[8:10]
+        green_in_sight = obs[10]
+        green_cx = obs[11]
+        green_area = obs[12]
+        red_in_sight = obs[13]
+        red_cx = obs[14]
+        red_area = obs[15]
+        red_captured = obs[16]
+        steps = obs[17]
+
+        if self.terminal_state:
+            self.steps_to_green = self.step_in_episode
+            return float(100)
+
+        if red_captured:
+            reward += self.orientation_distance_reward("base", robobo)
+
+            if self.prev_obs is None or not self.prev_obs[16]:
+                self.steps_since_red_captured = 0
+                reward += 16
+                self.notes += "Rd cptrd! "
+                self.steps_to_red = (
+                    (self.steps_to_red * (1 - self.red_alpha))
+                    + (self.step_in_episode * self.red_alpha)
+                    if self.steps_to_red
+                    else self.step_in_episode
+                )
+                self.red_captured += 1
+            else:
+                reward += 1
+                self.notes += "still cptrd! "
+                self.steps_since_red_captured += 1
+
+            if green_in_sight:
+                if self.prev_obs is None or not self.prev_obs[10]:
+                    reward += 8
+                    self.notes += "Gr lctd! "
+                    self.green_found += 1
+            else:
+                if self.prev_obs is not None and self.prev_obs[10]:
+                    reward -= 10
+                    self.notes += "Gr lost! "
+                    self.green_lost += 1
+
+        else:
+            reward += self.orientation_distance_reward("food", robobo)
+            self.steps_since_red_captured += 1
+
+            if self.prev_obs is not None and self.prev_obs[16]:
+                reward -= 20
+                self.notes += "Rd Uncptrd! "
+                self.red_uncaptured += 1
+
+            if red_in_sight:
+                if self.prev_obs is None or not self.prev_obs[13]:
+                    reward += 8
+                    self.notes += "Rd lctd! "
+                    self.red_found += 1
+            else:
+                if self.prev_obs is not None and self.prev_obs[13]:
+                    reward -= 10
+                    self.notes += "Rd lost! "
+                    self.red_lost += 1
+
+        reward -= self.punish_proximity(irs)
+
+        # Update previous observation for next step
+        self.prev_obs = obs.copy()
+        self.step_in_episode += 1
+
+        return float(reward)
+
+
+def convert_sensor_data_to_obs(sensor_data, lw, rw, food_captured, step_count):
+    """
+    Convert current sensor data format to expected observation format
+
+    Current sensor_data: [red_x, red_y, red_a, green_x, green_y, green_a, front_left, front_center, front_right, front_left_left, front_right_right, back_left, back_right, back_center]
+    Expected obs: [irs(8), wheels(2), green_in_sight, green_cx, green_area, red_in_sight, red_cx, red_area, red_captured, steps]
+    """
+    red_x, red_y, red_a = sensor_data[0], sensor_data[1], sensor_data[2]
+    green_x, green_y, green_a = sensor_data[3], sensor_data[4], sensor_data[5]
+
+    # Extract IR sensors (indices 6-13 in sensor_data)
+    irs = sensor_data[6:14]  # This should give us 8 IR values
+
+    # Wheels (normalized speeds)
+    wheels = [lw / 100.0, rw / 100.0]  # Normalize to [-1, 1] range
+
+    # Green object detection
+    green_in_sight = 1.0 if green_a > 0 else 0.0
+    green_cx = green_x
+    green_area = green_a
+
+    # Red object detection
+    red_in_sight = 1.0 if red_a > 0 else 0.0
+    red_cx = red_x
+    red_area = red_a
+
+    # Red captured status (based on robot-food distance)
+    red_captured = 1.0 if food_captured else 0.0
+
+    # Current step
+    steps = float(step_count)
+
+    obs = (
+        list(irs)
+        + wheels
+        + [
+            green_in_sight,
+            green_cx,
+            green_area,
+            red_in_sight,
+            red_cx,
+            red_area,
+            red_captured,
+            steps,
+        ]
+    )
+
+    return np.array(obs)
+
+
 def fitness_evaluation(
     rob: IRobobo,
     individual: Individual,
@@ -391,27 +601,9 @@ def fitness_evaluation(
     is_parallel_worker: bool = False,
 ) -> float:
     """
-    Three-phase fitness + alignment + speed.
-
-    Rewards per control step
-    ----------------------------------------------
-    SEARCH   :  +40⋅Δd_RF  + A₁  + 8⋅straight_speed
-    CARRY    :  +60⋅Δd_FB  + A₂  + 8⋅straight_speed
-    DONE     :                    – 0.05
-    One-shot :  +40 on pickup, +100 on delivery
-    ----------------------------------------------
+    Fitness evaluation using the new reward system
     """
-    # ------------ constants ------------------------------------------------ #
-    SCALE_RF = 40.0
-    SCALE_FB = 60.0
-    ALIGN_GAIN = 5.0
-    ALIGN_THRESH = 0.25
-    SPEED_GAIN = 8.0
-    PICKUP_BONUS = 40.0
-    DELIVERY_BONUS = 100.0
-    TIME_PENALTY = 0.05  # per loop
-
-    # ------------ reset simulation ---------------------------------------- #
+    # Reset simulation
     if isinstance(rob, SimulationRobobo):
         rob.stop_simulation()
         time.sleep(0.5)
@@ -423,89 +615,57 @@ def fitness_evaluation(
     detector.current_pan = 177
     detector.current_tilt = 109
 
-    # ------------ bookkeeping --------------------------------------------- #
-    fitness = 0.0
+    # Initialize reward tracker
+    reward_tracker = RewardTracker()
+
+    total_fitness = 0.0
     start_time = time.time()
-    prev_food_dist = rob.get_robot_food_distance()
-    prev_base_dist = rob.get_food_base_distance()
+    step_count = 0
 
-    has_food = False
-    delivered = False
-
-    # ===================================================================== #
+    # Main evaluation loop
     while time.time() - start_time < max_time:
-        # -------- perception --------------------------------------------- #
+        # Get sensor data
         ir = rob.read_irs()
         sensor_data, found_red, found_green = detector.get_sensor_data(ir)
-        red_x, green_x = sensor_data[0], sensor_data[3]
 
-        # -------- control ------------------------------------------------- #
+        # Get motor commands
         lw, rw = individual.get_motor_commands(sensor_data)
+
         rob.move(lw, rw, 300)
 
-        # Straight-line speed (0-1) — only forward motion counts
-        forward_avg = max(0.0, (lw + rw) / 200.0)  # –––> forward %
-        turn_penalty = abs(lw - rw) / 200.0
-        straight_speed = max(0.0, forward_avg - turn_penalty)
+        # Check if food is captured (robot near food)
+        food_captured = rob.get_robot_food_distance() < 0.17
 
-        # -------- distances ---------------------------------------------- #
-        food_dist = rob.get_robot_food_distance()
-        base_dist = rob.get_food_base_distance()
-        robot_has_food = food_dist < 0.17
-        food_in_base = base_dist < 0.10
+        # Check terminal condition (food delivered to base)
+        food_in_base = rob.get_food_base_distance() < 0.10
+        if food_in_base:
+            reward_tracker.terminal_state = True
 
-        # -------- SEARCH PHASE ------------------------------------------- #
-        if not has_food:
-            # fitness += (prev_food_dist - food_dist) * SCALE_RF
+        # Convert to observation format expected by reward function
+        obs = convert_sensor_data_to_obs(sensor_data, lw, rw, food_captured, step_count)
 
-            if found_red:
-                speed_norm = max(0.0, (lw + rw) / 200.0)
-                turn_penalty = abs(lw - rw) / 200.0
-                forwardness = 1.0 - turn_penalty
-                alignment_red = 1.0 - abs(sensor_data[0] - 0.5) * 2
-                fitness += speed_norm * forwardness * alignment_red
+        # Get step reward
+        step_reward = reward_tracker.get_reward(obs, rob)
+        total_fitness += step_reward
 
-            if robot_has_food:
-                has_food = True
-                fitness += PICKUP_BONUS
-
-        # -------- CARRY PHASE -------------------------------------------- #
-        elif not delivered:
-            # fitness += (prev_base_dist - base_dist) * SCALE_FB
-
-            if found_green and abs(green_x) < ALIGN_THRESH and forward_avg > 0:
-                speed_norm = max(0.0, (lw + rw) / 200.0)
-                turn_penalty = abs(lw - rw) / 200.0
-                forwardness = 1.0 - turn_penalty
-                alignment_red = 1.0 - abs(sensor_data[0] - 0.5) * 2
-                fitness += speed_norm * forwardness * alignment_red
-
-            if food_in_base:
-                delivered = True
-                fitness += DELIVERY_BONUS
-
-        # # -------- DONE PHASE --------------------------------------------- #
-        # else:
-        #     fitness -= TIME_PENALTY  # idle cost
-
-        # -------- universal per-step cost ------------------------------- #
-        fitness -= TIME_PENALTY
-
-        # -------- misc bookkeeping -------------------------------------- #
+        # Update individual's tracking variables
         individual.red_objects_found += int(found_red)
         individual.green_objects_found += int(found_green)
 
-        prev_food_dist = food_dist
-        prev_base_dist = base_dist
+        step_count += 1
 
-        if delivered:
+        # Break if terminal state reached
+        if reward_tracker.terminal_state:
             break
 
-    # ------------ wrap-up -------------------------------------------------- #
+    # Stop robot
     rob.move_blocking(0, 0, 200)
-    individual.fitness = fitness
+
+    # Set final fitness and other metrics
+    individual.fitness = total_fitness
     individual.survival_time = time.time() - start_time
-    return fitness
+
+    return total_fitness
 
 
 def evaluate_individual_worker_continuous(
@@ -650,9 +810,6 @@ def run_individual_from_file(
                 else:
                     distance_to_target = 0
 
-                print(
-                    f"Moving with L_speed={lw}, R_speed={rw}, found_red={found_red}, found_green={found_green}, distance_to_target={distance_to_target:.2f}"
-                )
                 rob.move(lw, rw, 300)  # Non-blocking move for continuous evaluation
 
                 # Calculate alignment reward
